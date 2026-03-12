@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "AI Memory - Conversation Saver",
+  "version": "1.0.0",
+  "description": "Automatically saves your conversations from Claude, ChatGPT, and Gemini so you never lose a thought.",
+  "permissions": [
+    "storage",
+    "tabs",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://claude.ai/*",
+    "https://chat.openai.com/*",
+    "https://chatgpt.com/*",
+    "https://gemini.google.com/*"
+  ],
+  "background": {
+    "service_worker": "scripts/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://claude.ai/*"],
+      "js": ["scripts/extractor-claude.js", "scripts/content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://chat.openai.com/*", "https://chatgpt.com/*"],
+      "js": ["scripts/extractor-chatgpt.js", "scripts/content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://gemini.google.com/*"],
+      "js": ["scripts/extractor-gemini.js", "scripts/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "pages/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["pages/viewer.html", "pages/viewer.js", "styles/viewer.css"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

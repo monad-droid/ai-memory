@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="../styles/viewer.css">
+  <title>AI Memory - Conversation Viewer</title>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header-left">
+        <a href="#" id="backBtn" class="back-btn" title="Back to all conversations">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="15 18 9 12 15 6"/>
+          </svg>
+        </a>
+        <div class="title-area">
+          <div class="platform-badge" id="platformBadge"></div>
+          <div>
+            <h1 id="convTitle">Loading...</h1>
+            <div class="meta" id="convMeta"></div>
+          </div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="copyBtn" class="btn" title="Copy as text">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+          Copy
+        </button>
+        <button id="exportJsonBtn" class="btn" title="Export as JSON">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          JSON
+        </button>
+        <button id="exportMdBtn" class="btn" title="Export as Markdown">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+          </svg>
+          Markdown
+        </button>
+      </div>
+    </header>
+
+    <main class="messages" id="messages">
+      <div class="loading">Loading conversation...</div>
+    </main>
+  </div>
+
+  <script src="viewer.js"></script>
+</body>
+</html>

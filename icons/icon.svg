@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6B5CE7"/>
+      <stop offset="100%" style="stop-color:#c084fc"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <!-- Chat bubble -->
+  <path d="M32 40 Q32 28 48 28 L80 28 Q96 28 96 40 L96 68 Q96 78 80 78 L54 78 L42 92 L44 78 Q32 78 32 68 Z"
+        fill="none" stroke="white" stroke-width="6" stroke-linejoin="round"/>
+  <!-- Memory dots -->
+  <circle cx="52" cy="55" r="5" fill="white"/>
+  <circle cx="64" cy="55" r="5" fill="white"/>
+  <circle cx="76" cy="55" r="5" fill="white"/>
+</svg>
