@@ -184,12 +184,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // Keep message channel open for async response
 });
 
-// Initialize badge on install
+// Initialize badge on install and re-inject content scripts into open tabs
 chrome.runtime.onInstalled.addListener(async () => {
   const index = await getConversationIndex();
   const count = index.length;
   if (count > 0) {
     chrome.action.setBadgeText({ text: String(count) });
     chrome.action.setBadgeBackgroundColor({ color: '#6B5CE7' });
+  }
+
+  // Re-inject content scripts into already-open matching tabs
+  // (content scripts don't survive extension reload)
+  const patterns = [
+    { urlPattern: 'https://claude.ai/*', scripts: ['scripts/extractor-claude.js', 'scripts/content.js'] },
+    { urlPattern: 'https://chat.openai.com/*', scripts: ['scripts/extractor-chatgpt.js', 'scripts/content.js'] },
+    { urlPattern: 'https://chatgpt.com/*', scripts: ['scripts/extractor-chatgpt.js', 'scripts/content.js'] },
+    { urlPattern: 'https://gemini.google.com/*', scripts: ['scripts/extractor-gemini.js', 'scripts/content.js'] }
+  ];
+
+  for (const { urlPattern, scripts } of patterns) {
+    try {
+      const tabs = await chrome.tabs.query({ url: urlPattern });
+      for (const tab of tabs) {
+        chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          files: scripts
+        }).catch(() => {}); // Ignore errors for tabs that can't be injected
+      }
+    } catch {}
   }
 });
