@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head><title>Icon Generator</title></head>
+<body>
+<p>Open this file in a browser, right-click each canvas, and "Save image as" to generate PNG icons.</p>
+<canvas id="c16" width="16" height="16"></canvas>
+<canvas id="c48" width="48" height="48"></canvas>
+<canvas id="c128" width="128" height="128"></canvas>
+<script>
+function drawIcon(canvas) {
+  const ctx = canvas.getContext('2d');
+  const s = canvas.width;
+
+  // Background circle
+  const gradient = ctx.createLinearGradient(0, 0, s, s);
+  gradient.addColorStop(0, '#6B5CE7');
+  gradient.addColorStop(1, '#c084fc');
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.roundRect(0, 0, s, s, s * 0.22);
+  ctx.fill();
+
+  // Brain/memory icon (simplified)
+  ctx.strokeStyle = 'white';
+  ctx.fillStyle = 'white';
+  ctx.lineWidth = Math.max(1, s * 0.06);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  const cx = s / 2;
+  const cy = s / 2;
+  const r = s * 0.28;
+
+  // Chat bubble
+  ctx.beginPath();
+  ctx.moveTo(cx - r, cy - r * 0.6);
+  ctx.quadraticCurveTo(cx - r, cy - r, cx - r * 0.3, cy - r);
+  ctx.lineTo(cx + r * 0.3, cy - r);
+  ctx.quadraticCurveTo(cx + r, cy - r, cx + r, cy - r * 0.6);
+  ctx.lineTo(cx + r, cy + r * 0.2);
+  ctx.quadraticCurveTo(cx + r, cy + r * 0.7, cx + r * 0.3, cy + r * 0.7);
+  ctx.lineTo(cx - r * 0.2, cy + r);
+  ctx.lineTo(cx - r * 0.3, cy + r * 0.7);
+  ctx.quadraticCurveTo(cx - r, cy + r * 0.7, cx - r, cy + r * 0.2);
+  ctx.closePath();
+  ctx.stroke();
+
+  // Dots inside (representing saved memories)
+  const dotR = Math.max(1, s * 0.05);
+  ctx.fillStyle = 'white';
+  [[-0.3, -0.15], [0, -0.15], [0.3, -0.15]].forEach(([dx, dy]) => {
+    ctx.beginPath();
+    ctx.arc(cx + r * dx, cy + r * dy, dotR, 0, Math.PI * 2);
+    ctx.fill();
+  });
+}
+
+['c16', 'c48', 'c128'].forEach(id => drawIcon(document.getElementById(id)));
+</script>
+</body>
+</html>
