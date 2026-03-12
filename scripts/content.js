@@ -9,6 +9,7 @@
   const MIN_MESSAGES_TO_SAVE = 1;
 
   let lastSavedHash = '';
+  let lastUrl = window.location.href;
   let saveTimer = null;
 
   function hashMessages(messages) {
@@ -59,8 +60,20 @@
     });
   }
 
+  // Reset state when the URL changes (SPA navigation to a new conversation)
+  function checkUrlChange() {
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      lastSavedHash = ''; // Reset so the new conversation gets saved
+      clearTimeout(saveTimer);
+      setTimeout(saveIfChanged, 1000);
+    }
+  }
+
   // Observe DOM changes to detect new messages
   const observer = new MutationObserver(() => {
+    checkUrlChange();
     clearTimeout(saveTimer);
     saveTimer = setTimeout(saveIfChanged, SAVE_INTERVAL_MS);
   });
@@ -72,6 +85,19 @@
       subtree: true,
       characterData: true
     });
+
+    // Detect SPA navigation via History API
+    const origPushState = history.pushState;
+    const origReplaceState = history.replaceState;
+    history.pushState = function () {
+      origPushState.apply(this, arguments);
+      checkUrlChange();
+    };
+    history.replaceState = function () {
+      origReplaceState.apply(this, arguments);
+      checkUrlChange();
+    };
+    window.addEventListener('popstate', checkUrlChange);
 
     // Do an initial capture
     setTimeout(saveIfChanged, 1000);
