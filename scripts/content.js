@@ -44,14 +44,17 @@
     const currentHash = hashMessages(conversation.messages);
     if (currentHash === lastSavedHash) return;
 
-    lastSavedHash = currentHash;
-
     chrome.runtime.sendMessage({
       type: 'SAVE_CONVERSATION',
       conversation
     }, (response) => {
       if (chrome.runtime.lastError) {
-        console.debug('[AI Memory] Save error:', chrome.runtime.lastError.message);
+        console.warn('[AI Memory] Save error:', chrome.runtime.lastError.message);
+        return;
+      }
+      // Only mark as saved if background confirmed the save
+      if (response && response.saved) {
+        lastSavedHash = currentHash;
       }
     });
   }
@@ -71,7 +74,7 @@
     });
 
     // Do an initial capture
-    setTimeout(saveIfChanged, 3000);
+    setTimeout(saveIfChanged, 1000);
   }
 
   if (document.readyState === 'complete') {

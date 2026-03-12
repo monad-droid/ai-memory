@@ -18,9 +18,11 @@ async function saveConversation(conversation) {
   const isNew = !index[id];
   const existingEntry = index[id];
 
-  // Only update if message count increased (conversation grew)
-  if (existingEntry && conversation.messageCount <= existingEntry.messageCount) {
-    return { saved: false, reason: 'no_new_messages' };
+  // Skip save only if message count AND title are identical (no changes)
+  if (existingEntry
+    && conversation.messageCount === existingEntry.messageCount
+    && conversation.title === existingEntry.title) {
+    return { saved: false, reason: 'no_changes' };
   }
 
   // Store the full conversation data under its own key
