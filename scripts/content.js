@@ -3,6 +3,7 @@
   'use strict';
 
   const extractor = window.__aiMemoryExtractor;
+  console.log('[AI Memory] Content script loaded, extractor:', extractor ? extractor.platformName : 'NOT FOUND');
   if (!extractor) return;
 
   const SAVE_INTERVAL_MS = 10000; // Save every 10 seconds if there are changes
@@ -18,12 +19,15 @@
 
   function captureConversation() {
     const conversationId = extractor.getConversationId();
+    console.log('[AI Memory] captureConversation - id:', conversationId, 'url:', window.location.pathname);
     if (!conversationId) return null;
 
     const messages = extractor.extractMessages();
+    console.log('[AI Memory] captureConversation - messages found:', messages.length);
     if (messages.length < MIN_MESSAGES_TO_SAVE) return null;
 
     const title = extractor.getConversationTitle() || `${extractor.platformName} conversation`;
+    console.log('[AI Memory] captureConversation - title:', title);
 
     return {
       id: `${extractor.platform}-${conversationId}`,
@@ -39,12 +43,20 @@
   }
 
   function saveIfChanged() {
+    console.log('[AI Memory] saveIfChanged triggered');
     const conversation = captureConversation();
-    if (!conversation) return;
+    if (!conversation) {
+      console.log('[AI Memory] No conversation captured');
+      return;
+    }
 
     const currentHash = hashMessages(conversation.messages);
-    if (currentHash === lastSavedHash) return;
+    if (currentHash === lastSavedHash) {
+      console.log('[AI Memory] Hash unchanged, skipping save');
+      return;
+    }
 
+    console.log('[AI Memory] Sending save request:', conversation.messageCount, 'messages');
     chrome.runtime.sendMessage({
       type: 'SAVE_CONVERSATION',
       conversation
@@ -53,6 +65,7 @@
         console.warn('[AI Memory] Save error:', chrome.runtime.lastError.message);
         return;
       }
+      console.log('[AI Memory] Save response:', response);
       // Only mark as saved if background confirmed the save
       if (response && response.saved) {
         lastSavedHash = currentHash;

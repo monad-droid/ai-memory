@@ -32,25 +32,51 @@ const ClaudeExtractor = {
 
   extractMessages() {
     const messages = [];
+    const log = (msg, ...args) => console.log(`[AI Memory] ${msg}`, ...args);
 
-    // Primary strategy: Find all message action bars and work backwards to content.
-    // Claude.ai has [role="group"][aria-label="Message actions"] on each message.
-    // Assistant messages have a feedback button; human messages don't.
+    // === DOM DIAGNOSTIC ===
+    // Log what we can find so we can debug selector issues
+    const allRoleGroups = document.querySelectorAll('[role="group"]');
+    const allAriaLabels = [];
+    allRoleGroups.forEach(g => {
+      const label = g.getAttribute('aria-label');
+      if (label) allAriaLabels.push(label);
+    });
+    log('Found role="group" elements:', allRoleGroups.length, 'aria-labels:', [...new Set(allAriaLabels)]);
+
+    const allButtons = document.querySelectorAll('button[data-testid]');
+    const testIds = [];
+    allButtons.forEach(b => testIds.push(b.getAttribute('data-testid')));
+    log('Found button data-testids:', [...new Set(testIds)]);
+
+    const allDataTestIds = document.querySelectorAll('[data-testid]');
+    const allTestIds = [];
+    allDataTestIds.forEach(el => allTestIds.push(el.tagName + ':' + el.getAttribute('data-testid')));
+    log('All data-testid elements:', [...new Set(allTestIds)].slice(0, 30));
+
+    // Primary strategy: Find all message action bars
     const actionGroups = document.querySelectorAll(
       '[role="group"][aria-label="Message actions"]'
     );
+    log('Strategy 1 - action groups with "Message actions":', actionGroups.length);
 
     if (actionGroups.length > 0) {
-      actionGroups.forEach(group => {
+      actionGroups.forEach((group, i) => {
+        const buttons = group.querySelectorAll('button');
+        const btnLabels = [];
+        buttons.forEach(b => btnLabels.push(b.getAttribute('aria-label') || b.textContent.trim().slice(0, 20)));
+        log(`  Group ${i} buttons:`, btnLabels);
+
         const hasFeedback = !!group.querySelector(
           'button[aria-label="Give positive feedback"], button[aria-label*="feedback"], button[aria-label*="thumbs"]'
         );
         const role = hasFeedback ? 'assistant' : 'human';
 
-        // Walk up from the action bar to find the message container
         const messageContainer = this.findMessageContainer(group);
+        log(`  Group ${i} role=${role}, container found=${!!messageContainer}`);
         if (messageContainer) {
           const content = this.extractContent(messageContainer);
+          log(`  Group ${i} content length=${content ? content.length : 0}, preview="${content ? content.slice(0, 80) : ''}"`);
           if (content) {
             messages.push({ role, content, timestamp: new Date().toISOString() });
           }
@@ -58,10 +84,15 @@ const ClaudeExtractor = {
       });
     }
 
-    if (messages.length >= 1) return messages;
+    if (messages.length >= 1) {
+      log('Strategy 1 succeeded with', messages.length, 'messages');
+      return messages;
+    }
 
-    // Fallback: Find copy buttons via data-testid and use feedback button presence
+    // Fallback: Find copy buttons via data-testid
     const copyButtons = document.querySelectorAll('button[data-testid="action-bar-copy"]');
+    log('Strategy 2 - copy buttons:', copyButtons.length);
+
     if (copyButtons.length > 0) {
       copyButtons.forEach(btn => {
         const group = btn.closest('[role="group"]');
@@ -79,10 +110,16 @@ const ClaudeExtractor = {
       });
     }
 
-    if (messages.length >= 1) return messages;
+    if (messages.length >= 1) {
+      log('Strategy 2 succeeded with', messages.length, 'messages');
+      return messages;
+    }
 
     // Last resort: find all substantial text blocks in the conversation area
-    return this.tryGenericExtraction();
+    log('Trying generic extraction...');
+    const generic = this.tryGenericExtraction();
+    log('Generic extraction found', generic.length, 'messages');
+    return generic;
   },
 
   // Walk up from an action bar element to find the enclosing message container
