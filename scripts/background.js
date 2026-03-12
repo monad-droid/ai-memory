@@ -145,6 +145,29 @@ async function searchConversations(query) {
   return titleMatches;
 }
 
+// Check storage usage
+async function getStorageUsage() {
+  const data = await chrome.storage.local.get(null);
+  const json = JSON.stringify(data);
+  const bytesUsed = new Blob([json]).size;
+  const quotaBytes = chrome.storage.local.QUOTA_BYTES || 10485760; // 10MB default
+  const index = await getConversationIndex();
+  return {
+    bytesUsed,
+    quotaBytes,
+    percentUsed: Math.round((bytesUsed / quotaBytes) * 100),
+    conversationCount: index.length,
+    formattedUsed: formatBytes(bytesUsed),
+    formattedQuota: formatBytes(quotaBytes)
+  };
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / 1048576).toFixed(1) + ' MB';
+}
+
 // Message handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = async () => {
@@ -171,6 +194,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'GET_STATS':
         const statsData = await chrome.storage.local.get(STORAGE_KEY_STATS);
         return statsData[STORAGE_KEY_STATS] || { totalConversations: 0, totalSaves: 0, byPlatform: {} };
+
+      case 'GET_STORAGE_USAGE':
+        return await getStorageUsage();
+
+      case 'CLEAR_ALL':
+        await chrome.storage.local.clear();
+        chrome.action.setBadgeText({ text: '' });
+        return { cleared: true };
 
       default:
         return { error: 'Unknown message type' };

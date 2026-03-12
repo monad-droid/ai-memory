@@ -8,14 +8,20 @@ const filterTabs = document.getElementById('filterTabs');
 const saveNowBtn = document.getElementById('saveNowBtn');
 const exportBtn = document.getElementById('exportBtn');
 const statsEl = document.getElementById('stats');
+const storageWarning = document.getElementById('storageWarning');
+const exportClearBtn = document.getElementById('exportClearBtn');
 
 let currentFilter = 'all';
 let allConversations = [];
+
+const STORAGE_WARN_PERCENT = 70;
+const STORAGE_CRITICAL_PERCENT = 90;
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
   await loadConversations();
   await loadStats();
+  await checkStorageUsage();
 });
 
 async function loadConversations() {
@@ -163,6 +169,55 @@ exportBtn.addEventListener('click', async () => {
   a.click();
   URL.revokeObjectURL(url);
   showToast(`Exported ${data.conversations.length} conversations`, 'success');
+});
+
+// Storage usage check
+async function checkStorageUsage() {
+  const usage = await sendMessage({ type: 'GET_STORAGE_USAGE' });
+  if (!usage) return;
+
+  if (usage.percentUsed >= STORAGE_WARN_PERCENT) {
+    storageWarning.style.display = 'flex';
+    document.getElementById('storagePercent').textContent = usage.percentUsed;
+    document.getElementById('storageDetail').textContent =
+      `${usage.formattedUsed} of ${usage.formattedQuota} used (${usage.conversationCount} conversations)`;
+
+    if (usage.percentUsed >= STORAGE_CRITICAL_PERCENT) {
+      storageWarning.classList.add('critical');
+    } else {
+      storageWarning.classList.remove('critical');
+    }
+  } else {
+    storageWarning.style.display = 'none';
+  }
+}
+
+// Export & Clear handler
+exportClearBtn.addEventListener('click', async () => {
+  // First export
+  const data = await sendMessage({ type: 'EXPORT_ALL' });
+  if (!data || !data.conversations || data.conversations.length === 0) {
+    showToast('No conversations to export', 'error');
+    return;
+  }
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ai-memory-export-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  // Then clear after a brief pause to ensure download started
+  setTimeout(async () => {
+    await sendMessage({ type: 'CLEAR_ALL' });
+    allConversations = [];
+    renderConversations();
+    await loadStats();
+    await checkStorageUsage();
+    showToast(`Exported ${data.conversations.length} conversations and cleared storage`, 'success');
+  }, 500);
 });
 
 // Helpers
