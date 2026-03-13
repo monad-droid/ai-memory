@@ -45,6 +45,14 @@
   }
 
   function saveIfChanged() {
+    // Never save conversations where we injected memory — these are dump chats,
+    // not real conversations. Saving them creates a circular loop: upload memory
+    // to Claude → Claude responds → response saved → needs uploading to ChatGPT → etc.
+    if (memoryAlreadyLoaded) {
+      console.log('[AI Memory] Skipping save — this is a memory dump chat');
+      return;
+    }
+
     console.log('[AI Memory] saveIfChanged triggered');
     const conversation = captureConversation();
     if (!conversation) {
@@ -137,6 +145,10 @@
   // Listen for manual save requests from the popup
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'MANUAL_SAVE') {
+      if (memoryAlreadyLoaded) {
+        sendResponse({ success: false, error: 'This is a memory dump chat — not saved to avoid sync loops' });
+        return true;
+      }
       const conversation = captureConversation();
       if (conversation) {
         lastSavedHash = hashMessages(conversation.messages);

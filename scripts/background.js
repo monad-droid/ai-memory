@@ -16,8 +16,22 @@ const PLATFORM_NEW_CHAT_URLS = {
   grok: 'https://grok.com/'
 };
 
+// Check if a conversation is a memory dump (injected by this extension)
+function isMemoryDumpConversation(conversation) {
+  if (!conversation.messages || conversation.messages.length === 0) return false;
+  const firstMsg = conversation.messages[0].content || '';
+  return /\[AIM:[a-z0-9]+\]/i.test(firstMsg)
+    || firstMsg.includes('# My AI Conversation History')
+    || firstMsg.includes('# New AI Conversation History');
+}
+
 // Save a conversation to local storage
 async function saveConversation(conversation) {
+  // Reject memory dump conversations to prevent circular sync loops
+  if (isMemoryDumpConversation(conversation)) {
+    return { saved: false, reason: 'memory_dump' };
+  }
+
   const { id } = conversation;
 
   // Get existing index
