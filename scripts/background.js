@@ -10,6 +10,14 @@ const STORAGE_KEY_STATS = 'ai_memory_stats';
 async function saveConversation(conversation) {
   const { id } = conversation;
 
+  // Skip conversations that are just injected memory dumps
+  if (conversation.messages && conversation.messages.length > 0) {
+    const firstMsg = conversation.messages[0].content || '';
+    if (/\[AIM:[a-z0-9]+\]/i.test(firstMsg)) {
+      return { saved: false, reason: 'memory_dump' };
+    }
+  }
+
   // Get existing index
   const indexData = await chrome.storage.local.get(STORAGE_KEY_INDEX);
   const index = indexData[STORAGE_KEY_INDEX] || {};
@@ -187,9 +195,12 @@ async function buildMemoryMarkdown(excludePlatform) {
   const conversations = [];
   for (const entry of index) {
     const conv = await getConversation(entry.id);
-    if (conv && (!excludePlatform || conv.platform !== excludePlatform)) {
-      conversations.push(conv);
-    }
+    if (!conv) continue;
+    if (excludePlatform && conv.platform === excludePlatform) continue;
+    // Skip conversations that started as memory dumps
+    const firstContent = conv.messages && conv.messages[0] && conv.messages[0].content || '';
+    if (/\[AIM:[a-z0-9]+\]/i.test(firstContent)) continue;
+    conversations.push(conv);
   }
 
   if (conversations.length === 0) return null;
