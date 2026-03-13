@@ -177,21 +177,21 @@ function formatBytes(bytes) {
 
 // Get the per-conversation tracking map for a platform
 // Returns { conversationId: messageCount } for all convos already sent to that platform
+// Each platform uses its own storage key to avoid race conditions when multiple
+// tabs call updateSentTracker concurrently (e.g. during Upload All).
 async function getSentTracker(platform) {
-  const data = await chrome.storage.local.get('ai_memory_settings');
-  const settings = data['ai_memory_settings'] || {};
-  return settings[`sentTo_${platform}`] || {};
+  const key = `ai_memory_sentTo_${platform}`;
+  const data = await chrome.storage.local.get(key);
+  return data[key] || {};
 }
 
 // Update the tracker after successful injection
 async function updateSentTracker(platform, sentMap) {
-  const data = await chrome.storage.local.get('ai_memory_settings');
-  const settings = data['ai_memory_settings'] || {};
-  const existing = settings[`sentTo_${platform}`] || {};
-  // Merge new entries into existing tracker
+  const key = `ai_memory_sentTo_${platform}`;
+  const data = await chrome.storage.local.get(key);
+  const existing = data[key] || {};
   Object.assign(existing, sentMap);
-  settings[`sentTo_${platform}`] = existing;
-  await chrome.storage.local.set({ 'ai_memory_settings': settings });
+  await chrome.storage.local.set({ [key]: existing });
 }
 
 // Filter messages from conversations that started as memory dumps
@@ -292,25 +292,25 @@ async function getUnsentCount() {
   const index = await getConversationIndex();
   if (index.length === 0) return 0;
 
-  // Load all sent trackers at once
-  const data = await chrome.storage.local.get('ai_memory_settings');
-  const settings = data['ai_memory_settings'] || {};
+  // Load all sent trackers at once (each platform has its own storage key)
+  const trackerKeys = ALL_PLATFORMS.map(p => `ai_memory_sentTo_${p}`);
+  const trackerData = await chrome.storage.local.get(trackerKeys);
   const trackers = {};
   for (const p of ALL_PLATFORMS) {
-    trackers[p] = settings[`sentTo_${p}`] || {};
+    trackers[p] = trackerData[`ai_memory_sentTo_${p}`] || {};
   }
 
   let unsentCount = 0;
   for (const entry of index) {
-    const conv = await getConversation(entry.id);
-    if (!conv || !conv.messages || conv.messages.length === 0) continue;
+    // Use messageCount from index — no need to load full conversation
+    const msgCount = entry.messageCount;
+    if (!msgCount || msgCount === 0) continue;
 
     // Check: has this conversation been sent to every OTHER platform?
-    const targetPlatforms = ALL_PLATFORMS.filter(p => p !== conv.platform);
-    const msgCount = conv.messages.length;
+    const targetPlatforms = ALL_PLATFORMS.filter(p => p !== entry.platform);
 
     for (const target of targetPlatforms) {
-      const sentCount = trackers[target][conv.id] || 0;
+      const sentCount = trackers[target][entry.id] || 0;
       if (sentCount < msgCount) {
         unsentCount++;
         break; // Count this conv once even if missing from multiple platforms
@@ -333,21 +333,20 @@ async function getUploadAllStatus() {
   const index = await getConversationIndex();
   if (index.length === 0) return { platforms: [], totalUnsent: 0 };
 
-  const data = await chrome.storage.local.get('ai_memory_settings');
-  const settings = data['ai_memory_settings'] || {};
+  const trackerKeys = ALL_PLATFORMS.map(p => `ai_memory_sentTo_${p}`);
+  const trackerData = await chrome.storage.local.get(trackerKeys);
 
   const platformStatus = {};
   for (const p of ALL_PLATFORMS) {
-    platformStatus[p] = { unsent: 0, tracker: settings[`sentTo_${p}`] || {} };
+    platformStatus[p] = { unsent: 0, tracker: trackerData[`ai_memory_sentTo_${p}`] || {} };
   }
 
   for (const entry of index) {
-    const conv = await getConversation(entry.id);
-    if (!conv || !conv.messages || conv.messages.length === 0) continue;
-    const msgCount = conv.messages.length;
-    const targets = ALL_PLATFORMS.filter(p => p !== conv.platform);
+    const msgCount = entry.messageCount;
+    if (!msgCount || msgCount === 0) continue;
+    const targets = ALL_PLATFORMS.filter(p => p !== entry.platform);
     for (const target of targets) {
-      const sentCount = platformStatus[target].tracker[conv.id] || 0;
+      const sentCount = platformStatus[target].tracker[entry.id] || 0;
       if (sentCount < msgCount) {
         platformStatus[target].unsent++;
       }
@@ -372,11 +371,11 @@ async function getIndexWithSync() {
   const index = await getConversationIndex();
   if (index.length === 0) return [];
 
-  const data = await chrome.storage.local.get('ai_memory_settings');
-  const settings = data['ai_memory_settings'] || {};
+  const trackerKeys = ALL_PLATFORMS.map(p => `ai_memory_sentTo_${p}`);
+  const trackerData = await chrome.storage.local.get(trackerKeys);
   const trackers = {};
   for (const p of ALL_PLATFORMS) {
-    trackers[p] = settings[`sentTo_${p}`] || {};
+    trackers[p] = trackerData[`ai_memory_sentTo_${p}`] || {};
   }
 
   return index.map(entry => {
@@ -477,8 +476,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true; // Keep message channel open for async response
 });
 
+// Migrate sentTo trackers from nested ai_memory_settings to per-platform keys
+async function migrateSentTrackers() {
+  const data = await chrome.storage.local.get('ai_memory_settings');
+  const settings = data['ai_memory_settings'] || {};
+  const updates = {};
+  let migrated = false;
+  for (const p of ALL_PLATFORMS) {
+    const oldKey = `sentTo_${p}`;
+    if (settings[oldKey] && Object.keys(settings[oldKey]).length > 0) {
+      const newKey = `ai_memory_sentTo_${p}`;
+      // Merge with any existing data in the new key
+      const existing = (await chrome.storage.local.get(newKey))[newKey] || {};
+      Object.assign(existing, settings[oldKey]);
+      updates[newKey] = existing;
+      delete settings[oldKey];
+      migrated = true;
+    }
+  }
+  if (migrated) {
+    updates['ai_memory_settings'] = settings;
+    await chrome.storage.local.set(updates);
+  }
+}
+
 // Initialize badge on install and re-inject content scripts into open tabs
 chrome.runtime.onInstalled.addListener(async () => {
+  await migrateSentTrackers();
   await refreshBadge();
 
   // Re-inject content scripts into already-open matching tabs
@@ -506,5 +530,6 @@ chrome.runtime.onInstalled.addListener(async () => {
 
 // Refresh badge on startup (not just install)
 chrome.runtime.onStartup.addListener(async () => {
+  await migrateSentTrackers();
   await refreshBadge();
 });
