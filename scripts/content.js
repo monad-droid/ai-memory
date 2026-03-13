@@ -84,7 +84,8 @@
       memoryAlreadyLoaded = false; // Reset memory state for new conversation
       clearTimeout(saveTimer);
       setTimeout(saveIfChanged, 1000);
-      setTimeout(checkAutoInject, 1500); // Check auto-inject for new page
+      // Delay auto-inject check to let the new page DOM settle
+      setTimeout(checkAutoInject, 3000);
     }
   }
 
@@ -166,7 +167,7 @@
     style.textContent = `
       #ai-memory-load-btn {
         position: fixed;
-        bottom: 80px;
+        bottom: 120px;
         right: 24px;
         z-index: 99999;
         width: 44px;
@@ -274,10 +275,9 @@
     }
   }
 
-  // Auto-inject: check if this is a new conversation and setting is enabled
+  // Auto-inject: check if this is a new/empty conversation and setting is enabled
   async function checkAutoInject() {
     if (memoryAlreadyLoaded) return;
-    if (!extractor.isNewConversation || !extractor.isNewConversation()) return;
 
     try {
       const autoInject = await new Promise((resolve) => {
@@ -286,15 +286,23 @@
 
       if (autoInject !== true) return;
 
-      // Wait for input element to be available
+      // Wait for input element and check if the conversation is empty
       let attempts = 0;
       const waitForInput = setInterval(() => {
         attempts++;
         const input = extractor.getInputElement();
         if (input) {
-          clearInterval(waitForInput);
-          console.log('[AI Memory] Auto-injecting memory into new conversation');
-          loadMemoryIntoChat(document.getElementById('ai-memory-load-btn'));
+          // Check if this is an empty/new conversation by looking for messages
+          const messages = extractor.extractMessages();
+          if (messages.length === 0) {
+            clearInterval(waitForInput);
+            console.log('[AI Memory] Auto-injecting memory into empty conversation');
+            loadMemoryIntoChat(document.getElementById('ai-memory-load-btn'));
+          } else {
+            // Has messages already — not a new conversation, stop checking
+            clearInterval(waitForInput);
+            console.log('[AI Memory] Conversation has messages, skipping auto-inject');
+          }
         }
         if (attempts > 20) clearInterval(waitForInput); // Give up after ~10s
       }, 500);
@@ -304,6 +312,14 @@
   }
 
   // Inject floating button and check auto-inject on initial load
-  injectFloatingButton();
-  setTimeout(checkAutoInject, 2000);
+  function initMemoryFeatures() {
+    injectFloatingButton();
+    setTimeout(checkAutoInject, 2000);
+  }
+
+  if (document.readyState === 'complete') {
+    initMemoryFeatures();
+  } else {
+    window.addEventListener('load', initMemoryFeatures);
+  }
 })();
