@@ -10,6 +10,7 @@ const exportBtn = document.getElementById('exportBtn');
 const statsEl = document.getElementById('stats');
 const storageWarning = document.getElementById('storageWarning');
 const exportClearBtn = document.getElementById('exportClearBtn');
+const memoryFileBtn = document.getElementById('memoryFileBtn');
 
 let currentFilter = 'all';
 let allConversations = [];
@@ -170,6 +171,70 @@ exportBtn.addEventListener('click', async () => {
   URL.revokeObjectURL(url);
   showToast(`Exported ${data.conversations.length} conversations`, 'success');
 });
+
+// Memory File button
+memoryFileBtn.addEventListener('click', async () => {
+  const data = await sendMessage({ type: 'EXPORT_ALL' });
+  if (!data || !data.conversations || data.conversations.length === 0) {
+    showToast('No conversations to create memory file from', 'error');
+    return;
+  }
+
+  const markdown = buildMemoryFileMarkdown(data.conversations);
+  const blob = new Blob([markdown], { type: 'text/markdown' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'my-ai-memory.md';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast(`Memory file created with ${data.conversations.length} conversations`, 'success');
+});
+
+function buildMemoryFileMarkdown(conversations) {
+  const platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
+
+  // Count by platform
+  const platformCounts = {};
+  for (const conv of conversations) {
+    const name = platformNames[conv.platform] || conv.platform;
+    platformCounts[name] = (platformCounts[name] || 0) + 1;
+  }
+  const platformSummary = Object.entries(platformCounts)
+    .map(([name, count]) => `${count} ${name}`)
+    .join(', ');
+
+  const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+  let md = `# My AI Conversation History\n`;
+  md += `> Generated on ${date} | ${conversations.length} conversations (${platformSummary})\n\n`;
+  md += `Use this file to understand my background, interests, communication style, and what I've been working on. Each conversation is separated by a horizontal rule.\n`;
+
+  // Sort by date, newest first
+  const sorted = [...conversations].sort((a, b) =>
+    new Date(b.lastUpdated) - new Date(a.lastUpdated)
+  );
+
+  for (const conv of sorted) {
+    const platform = platformNames[conv.platform] || conv.platform;
+    const convDate = new Date(conv.lastUpdated).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric'
+    });
+    const msgCount = conv.messages ? conv.messages.length : conv.messageCount || 0;
+
+    md += `\n---\n\n`;
+    md += `## "${conv.title}" — ${platform}, ${convDate} (${msgCount} messages)\n\n`;
+
+    if (conv.messages && conv.messages.length > 0) {
+      for (const msg of conv.messages) {
+        const role = msg.role === 'human' ? 'Me' : platform;
+        md += `**${role}:** ${msg.content}\n\n`;
+      }
+    }
+  }
+
+  return md;
+}
 
 // Storage usage check
 async function checkStorageUsage() {
