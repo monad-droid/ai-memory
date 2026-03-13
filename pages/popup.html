@@ -46,6 +46,13 @@
           </svg>
           Memory File
         </button>
+        <button id="uploadAllBtn" class="btn btn-accent" title="Open all AI platforms and sync missing memories">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Upload All
+        </button>
       </div>
     </div>
 
@@ -76,6 +83,7 @@
       <button class="tab" data-filter="claude">Claude</button>
       <button class="tab" data-filter="chatgpt">ChatGPT</button>
       <button class="tab" data-filter="gemini">Gemini</button>
+      <button class="tab" data-filter="grok">Grok</button>
     </div>
 
     <div class="conversation-list" id="conversationList">
@@ -84,7 +92,7 @@
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
         </svg>
         <p>No saved conversations yet.</p>
-        <p class="hint">Visit Claude, ChatGPT, or Gemini to start saving!</p>
+        <p class="hint">Visit Claude, ChatGPT, Gemini, or Grok to start saving!</p>
       </div>
     </div>
   </div>

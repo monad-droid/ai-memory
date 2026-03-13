@@ -6,6 +6,16 @@ const STORAGE_KEY_CONVERSATIONS = 'ai_memory_conversations';
 const STORAGE_KEY_INDEX = 'ai_memory_index';
 const STORAGE_KEY_STATS = 'ai_memory_stats';
 
+// All supported platforms and their new-chat URLs
+const ALL_PLATFORMS = ['claude', 'chatgpt', 'gemini', 'grok'];
+const PLATFORM_NAMES = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok' };
+const PLATFORM_NEW_CHAT_URLS = {
+  claude: 'https://claude.ai/new',
+  chatgpt: 'https://chatgpt.com/',
+  gemini: 'https://gemini.google.com/app',
+  grok: 'https://grok.com/'
+};
+
 // Save a conversation to local storage
 async function saveConversation(conversation) {
   const { id } = conversation;
@@ -48,10 +58,8 @@ async function saveConversation(conversation) {
   // Update stats
   await updateStats(isNew, conversation.platform);
 
-  // Update badge
-  const totalConversations = Object.keys(index).length;
-  chrome.action.setBadgeText({ text: String(totalConversations) });
-  chrome.action.setBadgeBackgroundColor({ color: '#6B5CE7' });
+  // Update badge to show unsent count
+  await refreshBadge();
 
   return { saved: true, isNew };
 }
@@ -98,8 +106,7 @@ async function deleteConversation(id) {
   delete index[id];
   await chrome.storage.local.set({ [STORAGE_KEY_INDEX]: index });
 
-  const totalConversations = Object.keys(index).length;
-  chrome.action.setBadgeText({ text: totalConversations > 0 ? String(totalConversations) : '' });
+  await refreshBadge();
 }
 
 // Export all conversations as JSON
@@ -192,7 +199,8 @@ function stripMemoryDumpPrefix(conv) {
   if (!conv.messages || conv.messages.length === 0) return conv;
   const firstMsg = conv.messages[0].content || '';
   const isMemoryDump = /\[AIM:[a-z0-9]+\]/i.test(firstMsg)
-    || firstMsg.includes('# My AI Conversation History');
+    || firstMsg.includes('# My AI Conversation History')
+    || firstMsg.includes('# New AI Conversation History');
   if (!isMemoryDump) return conv;
   // Skip the dump message + AI's response to it; keep only follow-up conversation
   let skipUntil = 1;
@@ -240,7 +248,7 @@ async function buildMemoryMarkdown(excludePlatform) {
   // Nothing new to inject
   if (conversations.length === 0) return null;
 
-  const platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
+  const platformNames = PLATFORM_NAMES;
   const platformCounts = {};
   for (const conv of conversations) {
     const name = platformNames[conv.platform] || conv.platform;
@@ -277,6 +285,86 @@ async function buildMemoryMarkdown(excludePlatform) {
   }
 
   return { markdown: md, sentMap: newSentMap, targetPlatform: excludePlatform };
+}
+
+// Count how many conversations are not yet synced to ALL other platforms
+async function getUnsentCount() {
+  const index = await getConversationIndex();
+  if (index.length === 0) return 0;
+
+  // Load all sent trackers at once
+  const data = await chrome.storage.local.get('ai_memory_settings');
+  const settings = data['ai_memory_settings'] || {};
+  const trackers = {};
+  for (const p of ALL_PLATFORMS) {
+    trackers[p] = settings[`sentTo_${p}`] || {};
+  }
+
+  let unsentCount = 0;
+  for (const entry of index) {
+    const conv = await getConversation(entry.id);
+    if (!conv || !conv.messages || conv.messages.length === 0) continue;
+
+    // Check: has this conversation been sent to every OTHER platform?
+    const targetPlatforms = ALL_PLATFORMS.filter(p => p !== conv.platform);
+    const msgCount = conv.messages.length;
+
+    for (const target of targetPlatforms) {
+      const sentCount = trackers[target][conv.id] || 0;
+      if (sentCount < msgCount) {
+        unsentCount++;
+        break; // Count this conv once even if missing from multiple platforms
+      }
+    }
+  }
+
+  return unsentCount;
+}
+
+// Refresh the badge to show unsent count
+async function refreshBadge() {
+  const count = await getUnsentCount();
+  chrome.action.setBadgeText({ text: count > 0 ? String(count) : '' });
+  chrome.action.setBadgeBackgroundColor({ color: '#6B5CE7' });
+}
+
+// Get upload-all status: which platforms need new conversations
+async function getUploadAllStatus() {
+  const index = await getConversationIndex();
+  if (index.length === 0) return { platforms: [], totalUnsent: 0 };
+
+  const data = await chrome.storage.local.get('ai_memory_settings');
+  const settings = data['ai_memory_settings'] || {};
+
+  const platformStatus = {};
+  for (const p of ALL_PLATFORMS) {
+    platformStatus[p] = { unsent: 0, tracker: settings[`sentTo_${p}`] || {} };
+  }
+
+  for (const entry of index) {
+    const conv = await getConversation(entry.id);
+    if (!conv || !conv.messages || conv.messages.length === 0) continue;
+    const msgCount = conv.messages.length;
+    const targets = ALL_PLATFORMS.filter(p => p !== conv.platform);
+    for (const target of targets) {
+      const sentCount = platformStatus[target].tracker[conv.id] || 0;
+      if (sentCount < msgCount) {
+        platformStatus[target].unsent++;
+      }
+    }
+  }
+
+  const platforms = ALL_PLATFORMS
+    .filter(p => platformStatus[p].unsent > 0)
+    .map(p => ({
+      platform: p,
+      name: PLATFORM_NAMES[p],
+      unsent: platformStatus[p].unsent,
+      url: PLATFORM_NEW_CHAT_URLS[p]
+    }));
+
+  const totalUnsent = platforms.reduce((sum, p) => sum + p.unsent, 0);
+  return { platforms, totalUnsent };
 }
 
 // Message handler
@@ -333,7 +421,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'MARK_MEMORY_SENT':
         await updateSentTracker(message.platform, message.sentMap);
+        await refreshBadge();
         return { saved: true };
+
+      case 'GET_UNSENT_COUNT':
+        return await getUnsentCount();
+
+      case 'GET_UPLOAD_ALL_STATUS':
+        return await getUploadAllStatus();
+
+      case 'REFRESH_BADGE':
+        await refreshBadge();
+        return { refreshed: true };
 
       default:
         return { error: 'Unknown message type' };
@@ -349,20 +448,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Initialize badge on install and re-inject content scripts into open tabs
 chrome.runtime.onInstalled.addListener(async () => {
-  const index = await getConversationIndex();
-  const count = index.length;
-  if (count > 0) {
-    chrome.action.setBadgeText({ text: String(count) });
-    chrome.action.setBadgeBackgroundColor({ color: '#6B5CE7' });
-  }
+  await refreshBadge();
 
   // Re-inject content scripts into already-open matching tabs
-  // (content scripts don't survive extension reload)
   const patterns = [
     { urlPattern: 'https://claude.ai/*', scripts: ['scripts/extractor-claude.js', 'scripts/content.js'] },
     { urlPattern: 'https://chat.openai.com/*', scripts: ['scripts/extractor-chatgpt.js', 'scripts/content.js'] },
     { urlPattern: 'https://chatgpt.com/*', scripts: ['scripts/extractor-chatgpt.js', 'scripts/content.js'] },
-    { urlPattern: 'https://gemini.google.com/*', scripts: ['scripts/extractor-gemini.js', 'scripts/content.js'] }
+    { urlPattern: 'https://gemini.google.com/*', scripts: ['scripts/extractor-gemini.js', 'scripts/content.js'] },
+    { urlPattern: 'https://x.com/i/grok*', scripts: ['scripts/extractor-grok.js', 'scripts/content.js'] },
+    { urlPattern: 'https://grok.com/*', scripts: ['scripts/extractor-grok.js', 'scripts/content.js'] }
   ];
 
   for (const { urlPattern, scripts } of patterns) {
@@ -372,8 +467,13 @@ chrome.runtime.onInstalled.addListener(async () => {
         chrome.scripting.executeScript({
           target: { tabId: tab.id },
           files: scripts
-        }).catch(() => {}); // Ignore errors for tabs that can't be injected
+        }).catch(() => {});
       }
     } catch {}
   }
+});
+
+// Refresh badge on startup (not just install)
+chrome.runtime.onStartup.addListener(async () => {
+  await refreshBadge();
 });

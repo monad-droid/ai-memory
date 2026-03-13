@@ -11,6 +11,7 @@ const statsEl = document.getElementById('stats');
 const storageWarning = document.getElementById('storageWarning');
 const exportClearBtn = document.getElementById('exportClearBtn');
 const memoryFileBtn = document.getElementById('memoryFileBtn');
+const uploadAllBtn = document.getElementById('uploadAllBtn');
 const autoInjectToggle = document.getElementById('autoInjectToggle');
 
 let currentFilter = 'all';
@@ -25,6 +26,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadStats();
   await checkStorageUsage();
   await loadAutoInjectSetting();
+  await updateUploadAllButton();
 });
 
 // Auto-inject toggle
@@ -50,7 +52,7 @@ async function loadStats() {
     if (stats.byPlatform) {
       for (const [platform, count] of Object.entries(stats.byPlatform)) {
         if (count > 0) {
-          const name = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' }[platform] || platform;
+          const name = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok' }[platform] || platform;
           parts.push(`<span class="platform-count">${name}: ${count}</span>`);
         }
       }
@@ -205,7 +207,7 @@ memoryFileBtn.addEventListener('click', async () => {
 });
 
 function buildMemoryFileMarkdown(conversations) {
-  const platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
+  const platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok' };
 
   // Count by platform
   const platformCounts = {};
@@ -248,6 +250,39 @@ function buildMemoryFileMarkdown(conversations) {
 
   return md;
 }
+
+// Upload All button — show unsent count and open tabs for each platform
+async function updateUploadAllButton() {
+  const status = await sendMessage({ type: 'GET_UPLOAD_ALL_STATUS' });
+  if (!status || status.totalUnsent === 0) {
+    uploadAllBtn.style.display = 'none';
+    return;
+  }
+  uploadAllBtn.style.display = 'flex';
+  const platformList = status.platforms.map(p => `${p.name}: ${p.unsent}`).join(', ');
+  uploadAllBtn.title = `Sync to: ${platformList}`;
+}
+
+uploadAllBtn.addEventListener('click', async () => {
+  const status = await sendMessage({ type: 'GET_UPLOAD_ALL_STATUS' });
+  if (!status || status.platforms.length === 0) {
+    showToast('All conversations are synced!', 'success');
+    return;
+  }
+
+  uploadAllBtn.classList.add('loading');
+
+  // Open a new tab for each platform that has unsent conversations
+  for (const p of status.platforms) {
+    chrome.tabs.create({ url: p.url, active: false });
+  }
+
+  showToast(`Opening ${status.platforms.length} AI platforms to sync ${status.totalUnsent} conversations`, 'success');
+
+  setTimeout(() => {
+    uploadAllBtn.classList.remove('loading');
+  }, 1000);
+});
 
 // Storage usage check
 async function checkStorageUsage() {
@@ -308,7 +343,7 @@ function sendMessage(message) {
 }
 
 function getPlatformLabel(platform) {
-  return { claude: 'C', chatgpt: 'G', gemini: 'Ge' }[platform] || '?';
+  return { claude: 'C', chatgpt: 'G', gemini: 'Ge', grok: 'Gk' }[platform] || '?';
 }
 
 function escapeHtml(str) {

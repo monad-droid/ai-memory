@@ -140,6 +140,21 @@ body {
   color: #e4e4e7;
 }
 
+.btn-accent {
+  background: linear-gradient(135deg, #6B5CE7, #8b7cf7);
+  color: white;
+  border: none;
+}
+
+.btn-accent:hover {
+  background: linear-gradient(135deg, #5a4bd6, #7b6ce7);
+}
+
+.btn-accent.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 /* Storage Warning */
 .storage-warning {
   display: flex;
@@ -364,6 +379,10 @@ body {
 
 .platform-badge.gemini {
   background: linear-gradient(135deg, #2563eb, #60a5fa);
+}
+
+.platform-badge.grok {
+  background: linear-gradient(135deg, #171717, #525252);
 }
 
 .conversation-info {
