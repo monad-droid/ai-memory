@@ -79,6 +79,7 @@
   function checkUrlChange() {
     const currentUrl = window.location.href;
     if (currentUrl !== lastUrl) {
+      console.log('[AI Memory] URL changed:', lastUrl, '->', currentUrl);
       lastUrl = currentUrl;
       lastSavedHash = ''; // Reset so the new conversation gets saved
       memoryAlreadyLoaded = false; // Reset memory state for new conversation
@@ -150,8 +151,10 @@
   // === MEMORY INJECTION ===
 
   function injectFloatingButton() {
+    console.log('[AI Memory] injectFloatingButton called, already injected:', floatingBtnInjected, 'exists in DOM:', !!document.getElementById('ai-memory-load-btn'));
     if (floatingBtnInjected || document.getElementById('ai-memory-load-btn')) return;
     floatingBtnInjected = true;
+    console.log('[AI Memory] Injecting floating button into page');
 
     const btn = document.createElement('button');
     btn.id = 'ai-memory-load-btn';
@@ -207,6 +210,7 @@
   }
 
   async function loadMemoryIntoChat(btn) {
+    console.log('[AI Memory] loadMemoryIntoChat called, btn:', !!btn);
     if (btn) btn.classList.add('loading');
 
     try {
@@ -246,6 +250,7 @@
   }
 
   function insertTextIntoInput(input, text) {
+    console.log('[AI Memory] insertTextIntoInput - tag:', input.tagName, 'contentEditable:', input.contentEditable, 'text length:', text.length);
     if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
       // For textarea/input elements
       const nativeSetter = Object.getOwnPropertyDescriptor(
@@ -277,44 +282,69 @@
 
   // Auto-inject: check if this is a new/empty conversation and setting is enabled
   async function checkAutoInject() {
+    console.log('[AI Memory] checkAutoInject called, memoryAlreadyLoaded:', memoryAlreadyLoaded, 'url:', window.location.href);
     if (memoryAlreadyLoaded) return;
 
     try {
       const autoInject = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'GET_SETTING', key: 'autoInject' }, resolve);
+        chrome.runtime.sendMessage({ type: 'GET_SETTING', key: 'autoInject' }, (result) => {
+          if (chrome.runtime.lastError) {
+            console.warn('[AI Memory] GET_SETTING error:', chrome.runtime.lastError.message);
+            resolve(null);
+          } else {
+            resolve(result);
+          }
+        });
       });
 
+      console.log('[AI Memory] autoInject setting:', autoInject);
       if (autoInject !== true) return;
 
-      // Wait for input element and check if the conversation is empty
+      // Check if this looks like a new conversation:
+      // - No conversation ID in URL (e.g. claude.ai/ or claude.ai/new), OR
+      // - Has conversation ID but zero messages in the DOM
+      const hasConversationId = !!extractor.getConversationId();
+      console.log('[AI Memory] hasConversationId:', hasConversationId);
+
+      // Wait for input element to be available, then check messages
       let attempts = 0;
       const waitForInput = setInterval(() => {
         attempts++;
         const input = extractor.getInputElement();
+        console.log('[AI Memory] waitForInput attempt', attempts, 'input found:', !!input);
+
         if (input) {
-          // Check if this is an empty/new conversation by looking for messages
           const messages = extractor.extractMessages();
+          console.log('[AI Memory] messages found:', messages.length);
+
           if (messages.length === 0) {
             clearInterval(waitForInput);
-            console.log('[AI Memory] Auto-injecting memory into empty conversation');
+            console.log('[AI Memory] Empty conversation detected, auto-injecting');
             loadMemoryIntoChat(document.getElementById('ai-memory-load-btn'));
           } else {
-            // Has messages already — not a new conversation, stop checking
+            // Has messages — not a new conversation
             clearInterval(waitForInput);
-            console.log('[AI Memory] Conversation has messages, skipping auto-inject');
+            console.log('[AI Memory] Conversation has', messages.length, 'messages, skipping');
           }
         }
-        if (attempts > 20) clearInterval(waitForInput); // Give up after ~10s
+        if (attempts >= 20) {
+          clearInterval(waitForInput);
+          console.log('[AI Memory] Gave up waiting for input after', attempts, 'attempts');
+        }
       }, 500);
     } catch (err) {
-      console.log('[AI Memory] Auto-inject check failed:', err);
+      console.error('[AI Memory] Auto-inject check failed:', err);
     }
   }
 
   // Inject floating button and check auto-inject on initial load
   function initMemoryFeatures() {
+    console.log('[AI Memory] initMemoryFeatures called, readyState:', document.readyState);
     injectFloatingButton();
-    setTimeout(checkAutoInject, 2000);
+    setTimeout(() => {
+      console.log('[AI Memory] Initial auto-inject check starting (2s after init)');
+      checkAutoInject();
+    }, 2000);
   }
 
   if (document.readyState === 'complete') {
