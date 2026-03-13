@@ -168,51 +168,76 @@ function formatBytes(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
-// Generate a short hash fingerprint from a string
-function generateFingerprint(str) {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+// Get the per-conversation tracking map for a platform
+// Returns { conversationId: messageCount } for all convos already sent to that platform
+async function getSentTracker(platform) {
+  const data = await chrome.storage.local.get('ai_memory_settings');
+  const settings = data['ai_memory_settings'] || {};
+  return settings[`sentTo_${platform}`] || {};
+}
+
+// Update the tracker after successful injection
+async function updateSentTracker(platform, sentMap) {
+  const data = await chrome.storage.local.get('ai_memory_settings');
+  const settings = data['ai_memory_settings'] || {};
+  const existing = settings[`sentTo_${platform}`] || {};
+  // Merge new entries into existing tracker
+  Object.assign(existing, sentMap);
+  settings[`sentTo_${platform}`] = existing;
+  await chrome.storage.local.set({ 'ai_memory_settings': settings });
+}
+
+// Filter messages from conversations that started as memory dumps
+function stripMemoryDumpPrefix(conv) {
+  if (!conv.messages || conv.messages.length === 0) return conv;
+  const firstMsg = conv.messages[0].content || '';
+  const isMemoryDump = /\[AIM:[a-z0-9]+\]/i.test(firstMsg)
+    || firstMsg.includes('# My AI Conversation History');
+  if (!isMemoryDump) return conv;
+  // Skip the dump message + AI's response to it; keep only follow-up conversation
+  let skipUntil = 1;
+  if (conv.messages.length > 1 && conv.messages[1].role === 'assistant') {
+    skipUntil = 2;
   }
-  // Convert to base36 for a compact alphanumeric code
-  return Math.abs(hash).toString(36);
+  conv.messages = conv.messages.slice(skipUntil);
+  return conv;
 }
 
 // Build memory markdown for injection into AI chats
 // excludePlatform: skip conversations from this platform (e.g. don't load Claude convos into Claude)
+// Returns { markdown, sentMap } where sentMap tracks what was included (to save after injection)
+// Returns null if there's nothing new to inject
 async function buildMemoryMarkdown(excludePlatform) {
   const index = await getConversationIndex();
   if (index.length === 0) return null;
 
+  const alreadySent = await getSentTracker(excludePlatform);
+
   const conversations = [];
+  const newSentMap = {}; // Track what we're including in this build
+
   for (const entry of index) {
     const conv = await getConversation(entry.id);
     if (!conv) continue;
     if (excludePlatform && conv.platform === excludePlatform) continue;
     if (!conv.messages || conv.messages.length === 0) continue;
 
-    // Check if the conversation started with a memory dump injection
-    const firstMsg = conv.messages[0].content || '';
-    const isMemoryDump = /\[AIM:[a-z0-9]+\]/i.test(firstMsg)
-      || firstMsg.includes('# My AI Conversation History');
+    // Strip memory dump prefix (keep only follow-up conversation after a dump)
+    stripMemoryDumpPrefix(conv);
+    if (conv.messages.length === 0) continue;
 
-    if (isMemoryDump) {
-      // Skip the memory dump message + the AI's response to it
-      // Only keep messages that came AFTER that initial exchange
-      let skipUntil = 1; // skip at least the dump message
-      // If next message is from assistant, skip that too (it's just analyzing the dump)
-      if (conv.messages.length > 1 && conv.messages[1].role === 'assistant') {
-        skipUntil = 2;
-      }
-      conv.messages = conv.messages.slice(skipUntil);
+    const msgCount = conv.messages.length;
+
+    // Skip if this exact conversation + message count was already sent to this platform
+    if (alreadySent[conv.id] && alreadySent[conv.id] >= msgCount) {
+      continue;
     }
 
-    // Only include if there are real messages left
-    if (conv.messages.length > 0) {
-      conversations.push(conv);
-    }
+    conversations.push(conv);
+    newSentMap[conv.id] = msgCount;
   }
 
+  // Nothing new to inject
   if (conversations.length === 0) return null;
 
   const platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
@@ -227,14 +252,9 @@ async function buildMemoryMarkdown(excludePlatform) {
 
   const date = new Date().toISOString().slice(0, 10);
 
-  // Build a content fingerprint from conversation IDs + counts so we can detect if memory was already loaded
-  const fingerprintSource = conversations.map(c => c.id + ':' + (c.messages ? c.messages.length : 0)).join(',');
-  const fingerprint = generateFingerprint(fingerprintSource);
-
-  let md = `[AIM:${fingerprint}]\n`;
-  md += `# My AI Conversation History\n`;
-  md += `> Generated on ${date} | ${conversations.length} conversations (${platformSummary})\n\n`;
-  md += `This is my conversation history across AI platforms. Use it to understand my background, interests, communication style, and what I've been working on.\n`;
+  let md = `# New AI Conversation History\n`;
+  md += `> Generated on ${date} | ${conversations.length} new/updated conversations (${platformSummary})\n\n`;
+  md += `This is my latest conversation history across AI platforms. Use it to understand my background, interests, communication style, and what I've been working on.\n`;
 
   // Sort newest first
   conversations.sort((a, b) => new Date(b.lastUpdated) - new Date(a.lastUpdated));
@@ -244,20 +264,19 @@ async function buildMemoryMarkdown(excludePlatform) {
     const convDate = new Date(conv.lastUpdated).toLocaleDateString('en-US', {
       year: 'numeric', month: 'short', day: 'numeric'
     });
-    const msgCount = conv.messages ? conv.messages.length : 0;
+    const msgCount = conv.messages.length;
+    const isUpdate = !!alreadySent[conv.id];
 
     md += `\n---\n\n`;
-    md += `## "${conv.title}" — ${platform}, ${convDate} (${msgCount} messages)\n\n`;
+    md += `## "${conv.title}" — ${platform}, ${convDate} (${msgCount} messages)${isUpdate ? ' [UPDATED]' : ''}\n\n`;
 
-    if (conv.messages && conv.messages.length > 0) {
-      for (const msg of conv.messages) {
-        const role = msg.role === 'human' ? 'Me' : platform;
-        md += `**${role}:** ${msg.content}\n\n`;
-      }
+    for (const msg of conv.messages) {
+      const role = msg.role === 'human' ? 'Me' : platform;
+      md += `**${role}:** ${msg.content}\n\n`;
     }
   }
 
-  return md;
+  return { markdown: md, sentMap: newSentMap, targetPlatform: excludePlatform };
 }
 
 // Message handler
@@ -311,6 +330,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'GET_MEMORY_MARKDOWN':
         return await buildMemoryMarkdown(message.excludePlatform);
+
+      case 'MARK_MEMORY_SENT':
+        await updateSentTracker(message.platform, message.sentMap);
+        return { saved: true };
 
       default:
         return { error: 'Unknown message type' };

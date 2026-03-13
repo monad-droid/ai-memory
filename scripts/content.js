@@ -8,13 +8,12 @@
 
   const SAVE_INTERVAL_MS = 10000; // Save every 10 seconds if there are changes
   const MIN_MESSAGES_TO_SAVE = 1;
-  const MEMORY_MARKER_RE = /\[AIM:[a-z0-9]+\]/i;
-
   let lastSavedHash = '';
   let lastUrl = window.location.href;
   let saveTimer = null;
   let memoryAlreadyLoaded = false;
   let floatingBtnInjected = false;
+  let pendingSentMap = null; // Track what needs to be marked as sent after user submits
 
   function hashMessages(messages) {
     return messages.map(m => m.role + ':' + m.content.slice(0, 100)).join('|');
@@ -151,18 +150,6 @@
 
   // === MEMORY INJECTION ===
 
-  // Check if any message in the conversation already contains a memory fingerprint
-  function conversationHasMemoryMarker() {
-    const messages = extractor.extractMessages();
-    for (const msg of messages) {
-      if (MEMORY_MARKER_RE.test(msg.content)) {
-        console.log('[AI Memory] Found memory marker in existing message');
-        return true;
-      }
-    }
-    return false;
-  }
-
   function injectFloatingButton() {
     console.log('[AI Memory] injectFloatingButton called, already injected:', floatingBtnInjected, 'exists in DOM:', !!document.getElementById('ai-memory-load-btn'));
     if (floatingBtnInjected || document.getElementById('ai-memory-load-btn')) return;
@@ -219,68 +206,23 @@
     document.head.appendChild(style);
     document.body.appendChild(btn);
 
-    btn.addEventListener('click', () => loadMemoryIntoChat(btn, true /* forceLoad */));
+    btn.addEventListener('click', () => loadMemoryIntoChat(btn));
   }
 
-  // Extract the fingerprint from a marker string like "[AIM:z11bml]"
-  function extractFingerprint(text) {
-    const match = text.match(/\[AIM:([a-z0-9]+)\]/i);
-    return match ? match[1] : null;
-  }
-
-  // Check if this fingerprint was already injected on this platform
-  async function wasAlreadyInjected(fingerprint) {
-    const result = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({
-        type: 'GET_SETTING',
-        key: `lastInjected_${extractor.platform}`
-      }, resolve);
-    });
-    return result === fingerprint;
-  }
-
-  // Mark this fingerprint as injected on this platform
-  function markAsInjected(fingerprint) {
-    chrome.runtime.sendMessage({
-      type: 'SET_SETTING',
-      key: `lastInjected_${extractor.platform}`,
-      value: fingerprint
-    });
-  }
-
-  async function loadMemoryIntoChat(btn, forceLoad) {
-    console.log('[AI Memory] loadMemoryIntoChat called, btn:', !!btn, 'force:', !!forceLoad);
-
-    // Check if memory marker exists in this conversation already
-    if (conversationHasMemoryMarker()) {
-      console.log('[AI Memory] Memory already present in this conversation, skipping');
-      memoryAlreadyLoaded = true;
-      return;
-    }
-
+  async function loadMemoryIntoChat(btn) {
+    console.log('[AI Memory] loadMemoryIntoChat called');
     if (btn) btn.classList.add('loading');
 
     try {
-      const markdown = await new Promise((resolve) => {
+      const result = await new Promise((resolve) => {
         chrome.runtime.sendMessage({ type: 'GET_MEMORY_MARKDOWN', excludePlatform: extractor.platform }, resolve);
       });
 
-      if (!markdown) {
-        console.log('[AI Memory] No memory data to load');
+      if (!result || !result.markdown) {
+        console.log('[AI Memory] No new memory to load');
+        memoryAlreadyLoaded = true; // Nothing new — don't keep retrying
         if (btn) btn.classList.remove('loading');
         return;
-      }
-
-      // Check if this exact memory version was already injected (globally on this platform)
-      const fingerprint = extractFingerprint(markdown);
-      if (fingerprint && !forceLoad) {
-        const alreadyDone = await wasAlreadyInjected(fingerprint);
-        if (alreadyDone) {
-          console.log('[AI Memory] Fingerprint', fingerprint, 'already injected on', extractor.platform, '— skipping');
-          memoryAlreadyLoaded = true;
-          if (btn) btn.classList.remove('loading');
-          return;
-        }
       }
 
       const input = extractor.getInputElement();
@@ -290,14 +232,21 @@
         return;
       }
 
-      insertTextIntoInput(input, markdown);
+      insertTextIntoInput(input, result.markdown);
       memoryAlreadyLoaded = true;
 
-      // Store the fingerprint so we don't inject this version again
-      if (fingerprint) {
-        markAsInjected(fingerprint);
-        console.log('[AI Memory] Marked fingerprint', fingerprint, 'as injected');
-      }
+      // Store the sentMap so we can mark these as sent once the user actually submits
+      pendingSentMap = { platform: result.targetPlatform, sentMap: result.sentMap };
+
+      // Mark as sent immediately — the text is in the input box ready to go
+      // (We don't wait for submit because the user might navigate away)
+      chrome.runtime.sendMessage({
+        type: 'MARK_MEMORY_SENT',
+        platform: result.targetPlatform,
+        sentMap: result.sentMap
+      }, () => {
+        console.log('[AI Memory] Marked', Object.keys(result.sentMap).length, 'conversations as sent to', result.targetPlatform);
+      });
 
       if (btn) {
         btn.classList.remove('loading');
@@ -386,15 +335,11 @@
             clearInterval(waitForInput);
             console.log('[AI Memory] Empty conversation detected, auto-injecting');
             loadMemoryIntoChat(document.getElementById('ai-memory-load-btn'));
-          } else if (messages.some(m => MEMORY_MARKER_RE.test(m.content))) {
-            // Memory was already injected in a previous visit
+          } else {
+            // Has messages — not a new conversation, skip auto-inject
             clearInterval(waitForInput);
             memoryAlreadyLoaded = true;
-            console.log('[AI Memory] Memory marker found in existing messages, skipping');
-          } else {
-            // Has messages but no marker — not a new conversation
-            clearInterval(waitForInput);
-            console.log('[AI Memory] Conversation has', messages.length, 'messages (no marker), skipping');
+            console.log('[AI Memory] Conversation has', messages.length, 'messages, skipping auto-inject');
           }
         }
         if (attempts >= 20) {
