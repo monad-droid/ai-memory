@@ -11,6 +11,7 @@ const statsEl = document.getElementById('stats');
 const storageWarning = document.getElementById('storageWarning');
 const exportClearBtn = document.getElementById('exportClearBtn');
 const memoryFileBtn = document.getElementById('memoryFileBtn');
+const autoInjectToggle = document.getElementById('autoInjectToggle');
 
 let currentFilter = 'all';
 let allConversations = [];
@@ -23,6 +24,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadConversations();
   await loadStats();
   await checkStorageUsage();
+  await loadAutoInjectSetting();
+});
+
+// Auto-inject toggle
+async function loadAutoInjectSetting() {
+  const result = await sendMessage({ type: 'GET_SETTING', key: 'autoInject' });
+  autoInjectToggle.checked = result === true;
+}
+
+autoInjectToggle.addEventListener('change', async () => {
+  await sendMessage({ type: 'SET_SETTING', key: 'autoInject', value: autoInjectToggle.checked });
+  showToast(autoInjectToggle.checked ? 'Auto-load enabled' : 'Auto-load disabled', 'success');
 });
 
 async function loadConversations() {

@@ -12,6 +12,8 @@
   let lastSavedHash = '';
   let lastUrl = window.location.href;
   let saveTimer = null;
+  let memoryAlreadyLoaded = false;
+  let floatingBtnInjected = false;
 
   function hashMessages(messages) {
     return messages.map(m => m.role + ':' + m.content.slice(0, 100)).join('|');
@@ -79,8 +81,10 @@
     if (currentUrl !== lastUrl) {
       lastUrl = currentUrl;
       lastSavedHash = ''; // Reset so the new conversation gets saved
+      memoryAlreadyLoaded = false; // Reset memory state for new conversation
       clearTimeout(saveTimer);
       setTimeout(saveIfChanged, 1000);
+      setTimeout(checkAutoInject, 1500); // Check auto-inject for new page
     }
   }
 
@@ -141,4 +145,165 @@
     }
     return true;
   });
+
+  // === MEMORY INJECTION ===
+
+  function injectFloatingButton() {
+    if (floatingBtnInjected || document.getElementById('ai-memory-load-btn')) return;
+    floatingBtnInjected = true;
+
+    const btn = document.createElement('button');
+    btn.id = 'ai-memory-load-btn';
+    btn.title = 'Load AI Memory into this chat';
+    btn.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/>
+        <line x1="10" y1="22" x2="14" y2="22"/>
+      </svg>
+    `;
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #ai-memory-load-btn {
+        position: fixed;
+        bottom: 80px;
+        right: 24px;
+        z-index: 99999;
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        border: 1px solid rgba(107, 92, 231, 0.3);
+        background: rgba(15, 15, 20, 0.9);
+        color: #8b7cf7;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+        transition: all 0.2s;
+        backdrop-filter: blur(8px);
+      }
+      #ai-memory-load-btn:hover {
+        background: rgba(107, 92, 231, 0.2);
+        border-color: #8b7cf7;
+        transform: scale(1.1);
+      }
+      #ai-memory-load-btn.loading {
+        opacity: 0.6;
+        pointer-events: none;
+      }
+      #ai-memory-load-btn.done {
+        background: rgba(5, 150, 105, 0.2);
+        border-color: #059669;
+        color: #10b981;
+      }
+    `;
+
+    document.head.appendChild(style);
+    document.body.appendChild(btn);
+
+    btn.addEventListener('click', () => loadMemoryIntoChat(btn));
+  }
+
+  async function loadMemoryIntoChat(btn) {
+    if (btn) btn.classList.add('loading');
+
+    try {
+      const markdown = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_MEMORY_MARKDOWN' }, resolve);
+      });
+
+      if (!markdown) {
+        console.log('[AI Memory] No memory data to load');
+        if (btn) btn.classList.remove('loading');
+        return;
+      }
+
+      const input = extractor.getInputElement();
+      if (!input) {
+        console.warn('[AI Memory] Could not find chat input element');
+        if (btn) btn.classList.remove('loading');
+        return;
+      }
+
+      insertTextIntoInput(input, markdown);
+      memoryAlreadyLoaded = true;
+
+      if (btn) {
+        btn.classList.remove('loading');
+        btn.classList.add('done');
+        btn.title = 'Memory loaded!';
+        setTimeout(() => {
+          btn.classList.remove('done');
+          btn.title = 'Load AI Memory into this chat';
+        }, 3000);
+      }
+    } catch (err) {
+      console.error('[AI Memory] Failed to load memory:', err);
+      if (btn) btn.classList.remove('loading');
+    }
+  }
+
+  function insertTextIntoInput(input, text) {
+    if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
+      // For textarea/input elements
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype, 'value'
+      )?.set || Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, 'value'
+      )?.set;
+
+      if (nativeSetter) {
+        nativeSetter.call(input, text);
+      } else {
+        input.value = text;
+      }
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    } else if (input.contentEditable === 'true') {
+      // For contenteditable elements (Claude, Gemini)
+      input.focus();
+      // Clear existing content
+      input.innerHTML = '';
+      // Insert as a paragraph
+      const p = document.createElement('p');
+      p.textContent = text;
+      input.appendChild(p);
+      // Dispatch input event so the framework picks up the change
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText' }));
+    }
+  }
+
+  // Auto-inject: check if this is a new conversation and setting is enabled
+  async function checkAutoInject() {
+    if (memoryAlreadyLoaded) return;
+    if (!extractor.isNewConversation || !extractor.isNewConversation()) return;
+
+    try {
+      const autoInject = await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ type: 'GET_SETTING', key: 'autoInject' }, resolve);
+      });
+
+      if (autoInject !== true) return;
+
+      // Wait for input element to be available
+      let attempts = 0;
+      const waitForInput = setInterval(() => {
+        attempts++;
+        const input = extractor.getInputElement();
+        if (input) {
+          clearInterval(waitForInput);
+          console.log('[AI Memory] Auto-injecting memory into new conversation');
+          loadMemoryIntoChat(document.getElementById('ai-memory-load-btn'));
+        }
+        if (attempts > 20) clearInterval(waitForInput); // Give up after ~10s
+      }, 500);
+    } catch (err) {
+      console.log('[AI Memory] Auto-inject check failed:', err);
+    }
+  }
+
+  // Inject floating button and check auto-inject on initial load
+  injectFloatingButton();
+  setTimeout(checkAutoInject, 2000);
 })();

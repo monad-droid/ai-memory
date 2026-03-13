@@ -194,5 +194,17 @@ const ClaudeExtractor = {
   }
 };
 
+  getInputElement() {
+    return document.querySelector('[contenteditable="true"].ProseMirror') ||
+           document.querySelector('[contenteditable="true"]') ||
+           document.querySelector('textarea');
+  },
+
+  isNewConversation() {
+    // No conversation ID in URL means it's the new chat page
+    return !this.getConversationId();
+  }
+};
+
 // Expose to content.js
 window.__aiMemoryExtractor = ClaudeExtractor;

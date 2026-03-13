@@ -82,4 +82,16 @@ const ChatGPTExtractor = {
   }
 };
 
+  getInputElement() {
+    return document.querySelector('#prompt-textarea') ||
+           document.querySelector('textarea[data-id="root"]') ||
+           document.querySelector('[contenteditable="true"]') ||
+           document.querySelector('textarea');
+  },
+
+  isNewConversation() {
+    return !this.getConversationId();
+  }
+};
+
 window.__aiMemoryExtractor = ChatGPTExtractor;

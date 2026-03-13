@@ -168,6 +168,57 @@ function formatBytes(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+// Build memory markdown for injection into AI chats
+async function buildMemoryMarkdown() {
+  const index = await getConversationIndex();
+  if (index.length === 0) return null;
+
+  const conversations = [];
+  for (const entry of index) {
+    const conv = await getConversation(entry.id);
+    if (conv) conversations.push(conv);
+  }
+
+  const platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
+  const platformCounts = {};
+  for (const conv of conversations) {
+    const name = platformNames[conv.platform] || conv.platform;
+    platformCounts[name] = (platformCounts[name] || 0) + 1;
+  }
+  const platformSummary = Object.entries(platformCounts)
+    .map(([name, count]) => `${count} ${name}`)
+    .join(', ');
+
+  const date = new Date().toISOString().slice(0, 10);
+
+  let md = `# My AI Conversation History\n`;
+  md += `> Generated on ${date} | ${conversations.length} conversations (${platformSummary})\n\n`;
+  md += `This is my conversation history across AI platforms. Use it to understand my background, interests, communication style, and what I've been working on.\n`;
+
+  // Sort newest first
+  conversations.sort((a, b) => new Date(b.lastUpdated) - new Date(a.lastUpdated));
+
+  for (const conv of conversations) {
+    const platform = platformNames[conv.platform] || conv.platform;
+    const convDate = new Date(conv.lastUpdated).toLocaleDateString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric'
+    });
+    const msgCount = conv.messages ? conv.messages.length : conv.messageCount || 0;
+
+    md += `\n---\n\n`;
+    md += `## "${conv.title}" — ${platform}, ${convDate} (${msgCount} messages)\n\n`;
+
+    if (conv.messages && conv.messages.length > 0) {
+      for (const msg of conv.messages) {
+        const role = msg.role === 'human' ? 'Me' : platform;
+        md += `**${role}:** ${msg.content}\n\n`;
+      }
+    }
+  }
+
+  return md;
+}
+
 // Message handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = async () => {
@@ -202,6 +253,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         await chrome.storage.local.clear();
         chrome.action.setBadgeText({ text: '' });
         return { cleared: true };
+
+      case 'GET_SETTING': {
+        const settingData = await chrome.storage.local.get('ai_memory_settings');
+        const settings = settingData['ai_memory_settings'] || {};
+        return settings[message.key] ?? null;
+      }
+
+      case 'SET_SETTING': {
+        const settingsData = await chrome.storage.local.get('ai_memory_settings');
+        const allSettings = settingsData['ai_memory_settings'] || {};
+        allSettings[message.key] = message.value;
+        await chrome.storage.local.set({ 'ai_memory_settings': allSettings });
+        return { saved: true };
+      }
+
+      case 'GET_MEMORY_MARKDOWN':
+        return await buildMemoryMarkdown();
 
       default:
         return { error: 'Unknown message type' };

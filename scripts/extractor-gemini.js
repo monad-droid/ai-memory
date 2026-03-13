@@ -87,4 +87,15 @@ const GeminiExtractor = {
   }
 };
 
+  getInputElement() {
+    return document.querySelector('.ql-editor[contenteditable="true"]') ||
+           document.querySelector('[contenteditable="true"]') ||
+           document.querySelector('textarea');
+  },
+
+  isNewConversation() {
+    return !this.getConversationId();
+  }
+};
+
 window.__aiMemoryExtractor = GeminiExtractor;
