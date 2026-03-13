@@ -184,21 +184,31 @@ async function buildMemoryMarkdown(excludePlatform) {
   const index = await getConversationIndex();
   if (index.length === 0) return null;
 
-  const AIM_RE = /\[AIM:[a-z0-9]+\]/i;
-
   const conversations = [];
   for (const entry of index) {
     const conv = await getConversation(entry.id);
     if (!conv) continue;
     if (excludePlatform && conv.platform === excludePlatform) continue;
+    if (!conv.messages || conv.messages.length === 0) continue;
 
-    // Filter out any messages that are memory dumps (contain [AIM:...])
-    if (conv.messages && conv.messages.length > 0) {
-      conv.messages = conv.messages.filter(m => !AIM_RE.test(m.content));
+    // Check if the conversation started with a memory dump injection
+    const firstMsg = conv.messages[0].content || '';
+    const isMemoryDump = /\[AIM:[a-z0-9]+\]/i.test(firstMsg)
+      || firstMsg.includes('# My AI Conversation History');
+
+    if (isMemoryDump) {
+      // Skip the memory dump message + the AI's response to it
+      // Only keep messages that came AFTER that initial exchange
+      let skipUntil = 1; // skip at least the dump message
+      // If next message is from assistant, skip that too (it's just analyzing the dump)
+      if (conv.messages.length > 1 && conv.messages[1].role === 'assistant') {
+        skipUntil = 2;
+      }
+      conv.messages = conv.messages.slice(skipUntil);
     }
 
-    // Only include if there are real messages left after filtering
-    if (conv.messages && conv.messages.length > 0) {
+    // Only include if there are real messages left
+    if (conv.messages.length > 0) {
       conversations.push(conv);
     }
   }
