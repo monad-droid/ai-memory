@@ -191,8 +191,7 @@ const ClaudeExtractor = {
     // Don't return if it's just a role label or empty
     if (!text || text === 'You' || text === 'Claude' || text === 'Assistant') return '';
     return text;
-  }
-};
+  },
 
   getInputElement() {
     return document.querySelector('[contenteditable="true"].ProseMirror') ||
