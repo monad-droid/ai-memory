@@ -168,6 +168,16 @@ function formatBytes(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+// Generate a short hash fingerprint from a string
+function generateFingerprint(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+  }
+  // Convert to base36 for a compact alphanumeric code
+  return Math.abs(hash).toString(36);
+}
+
 // Build memory markdown for injection into AI chats
 // excludePlatform: skip conversations from this platform (e.g. don't load Claude convos into Claude)
 async function buildMemoryMarkdown(excludePlatform) {
@@ -196,7 +206,12 @@ async function buildMemoryMarkdown(excludePlatform) {
 
   const date = new Date().toISOString().slice(0, 10);
 
-  let md = `# My AI Conversation History\n`;
+  // Build a content fingerprint from conversation IDs + counts so we can detect if memory was already loaded
+  const fingerprintSource = conversations.map(c => c.id + ':' + (c.messages ? c.messages.length : 0)).join(',');
+  const fingerprint = generateFingerprint(fingerprintSource);
+
+  let md = `[AIM:${fingerprint}]\n`;
+  md += `# My AI Conversation History\n`;
   md += `> Generated on ${date} | ${conversations.length} conversations (${platformSummary})\n\n`;
   md += `This is my conversation history across AI platforms. Use it to understand my background, interests, communication style, and what I've been working on.\n`;
 

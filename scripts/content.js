@@ -8,6 +8,7 @@
 
   const SAVE_INTERVAL_MS = 10000; // Save every 10 seconds if there are changes
   const MIN_MESSAGES_TO_SAVE = 1;
+  const MEMORY_MARKER_RE = /\[AIM:[a-z0-9]+\]/i;
 
   let lastSavedHash = '';
   let lastUrl = window.location.href;
@@ -150,6 +151,18 @@
 
   // === MEMORY INJECTION ===
 
+  // Check if any message in the conversation already contains a memory fingerprint
+  function conversationHasMemoryMarker() {
+    const messages = extractor.extractMessages();
+    for (const msg of messages) {
+      if (MEMORY_MARKER_RE.test(msg.content)) {
+        console.log('[AI Memory] Found memory marker in existing message');
+        return true;
+      }
+    }
+    return false;
+  }
+
   function injectFloatingButton() {
     console.log('[AI Memory] injectFloatingButton called, already injected:', floatingBtnInjected, 'exists in DOM:', !!document.getElementById('ai-memory-load-btn'));
     if (floatingBtnInjected || document.getElementById('ai-memory-load-btn')) return;
@@ -211,6 +224,14 @@
 
   async function loadMemoryIntoChat(btn) {
     console.log('[AI Memory] loadMemoryIntoChat called, btn:', !!btn);
+
+    // Check if memory was already loaded in this conversation
+    if (conversationHasMemoryMarker()) {
+      console.log('[AI Memory] Memory already present in conversation, skipping');
+      memoryAlreadyLoaded = true;
+      return;
+    }
+
     if (btn) btn.classList.add('loading');
 
     try {
@@ -321,10 +342,15 @@
             clearInterval(waitForInput);
             console.log('[AI Memory] Empty conversation detected, auto-injecting');
             loadMemoryIntoChat(document.getElementById('ai-memory-load-btn'));
-          } else {
-            // Has messages — not a new conversation
+          } else if (messages.some(m => MEMORY_MARKER_RE.test(m.content))) {
+            // Memory was already injected in a previous visit
             clearInterval(waitForInput);
-            console.log('[AI Memory] Conversation has', messages.length, 'messages, skipping');
+            memoryAlreadyLoaded = true;
+            console.log('[AI Memory] Memory marker found in existing messages, skipping');
+          } else {
+            // Has messages but no marker — not a new conversation
+            clearInterval(waitForInput);
+            console.log('[AI Memory] Conversation has', messages.length, 'messages (no marker), skipping');
           }
         }
         if (attempts >= 20) {
