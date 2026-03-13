@@ -312,6 +312,10 @@ uploadAllBtn.addEventListener('click', async () => {
 
   uploadAllBtn.classList.add('loading');
 
+  // Set force-inject flag so content scripts inject even if auto-inject is off
+  const platformsToSync = status.platforms.map(p => p.platform);
+  await sendMessage({ type: 'SET_SETTING', key: 'forceInjectPlatforms', value: platformsToSync });
+
   for (const p of status.platforms) {
     chrome.tabs.create({ url: p.url, active: false });
   }

@@ -295,30 +295,47 @@
   }
 
   // Auto-inject: check if this is a new/empty conversation and setting is enabled
+  // Also checks forceInjectPlatforms (set by Upload All) to inject regardless of toggle
   async function checkAutoInject() {
     console.log('[AI Memory] checkAutoInject called, memoryAlreadyLoaded:', memoryAlreadyLoaded, 'url:', window.location.href);
     if (memoryAlreadyLoaded) return;
 
     try {
-      const autoInject = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'GET_SETTING', key: 'autoInject' }, (result) => {
-          if (chrome.runtime.lastError) {
-            console.warn('[AI Memory] GET_SETTING error:', chrome.runtime.lastError.message);
-            resolve(null);
-          } else {
-            resolve(result);
-          }
+      const [autoInject, forceList] = await Promise.all([
+        new Promise((resolve) => {
+          chrome.runtime.sendMessage({ type: 'GET_SETTING', key: 'autoInject' }, (result) => {
+            if (chrome.runtime.lastError) {
+              resolve(null);
+            } else {
+              resolve(result);
+            }
+          });
+        }),
+        new Promise((resolve) => {
+          chrome.runtime.sendMessage({ type: 'GET_SETTING', key: 'forceInjectPlatforms' }, (result) => {
+            if (chrome.runtime.lastError) {
+              resolve(null);
+            } else {
+              resolve(result);
+            }
+          });
+        })
+      ]);
+
+      const forceInject = Array.isArray(forceList) && forceList.includes(extractor.platform);
+      console.log('[AI Memory] autoInject:', autoInject, 'forceInject:', forceInject, 'platform:', extractor.platform);
+
+      if (autoInject !== true && !forceInject) return;
+
+      // If this was a forced inject (from Upload All), clear this platform from the list
+      if (forceInject) {
+        const remaining = forceList.filter(p => p !== extractor.platform);
+        chrome.runtime.sendMessage({
+          type: 'SET_SETTING',
+          key: 'forceInjectPlatforms',
+          value: remaining.length > 0 ? remaining : null
         });
-      });
-
-      console.log('[AI Memory] autoInject setting:', autoInject);
-      if (autoInject !== true) return;
-
-      // Check if this looks like a new conversation:
-      // - No conversation ID in URL (e.g. claude.ai/ or claude.ai/new), OR
-      // - Has conversation ID but zero messages in the DOM
-      const hasConversationId = !!extractor.getConversationId();
-      console.log('[AI Memory] hasConversationId:', hasConversationId);
+      }
 
       // Wait for input element to be available, then check messages
       let attempts = 0;
@@ -333,7 +350,7 @@
 
           if (messages.length === 0) {
             clearInterval(waitForInput);
-            console.log('[AI Memory] Empty conversation detected, auto-injecting');
+            console.log('[AI Memory] Empty conversation detected, injecting memory');
             loadMemoryIntoChat(document.getElementById('ai-memory-load-btn'));
           } else {
             // Has messages — not a new conversation, skip auto-inject
