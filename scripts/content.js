@@ -219,15 +219,41 @@
     document.head.appendChild(style);
     document.body.appendChild(btn);
 
-    btn.addEventListener('click', () => loadMemoryIntoChat(btn));
+    btn.addEventListener('click', () => loadMemoryIntoChat(btn, true /* forceLoad */));
   }
 
-  async function loadMemoryIntoChat(btn) {
-    console.log('[AI Memory] loadMemoryIntoChat called, btn:', !!btn);
+  // Extract the fingerprint from a marker string like "[AIM:z11bml]"
+  function extractFingerprint(text) {
+    const match = text.match(/\[AIM:([a-z0-9]+)\]/i);
+    return match ? match[1] : null;
+  }
 
-    // Check if memory was already loaded in this conversation
+  // Check if this fingerprint was already injected on this platform
+  async function wasAlreadyInjected(fingerprint) {
+    const result = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({
+        type: 'GET_SETTING',
+        key: `lastInjected_${extractor.platform}`
+      }, resolve);
+    });
+    return result === fingerprint;
+  }
+
+  // Mark this fingerprint as injected on this platform
+  function markAsInjected(fingerprint) {
+    chrome.runtime.sendMessage({
+      type: 'SET_SETTING',
+      key: `lastInjected_${extractor.platform}`,
+      value: fingerprint
+    });
+  }
+
+  async function loadMemoryIntoChat(btn, forceLoad) {
+    console.log('[AI Memory] loadMemoryIntoChat called, btn:', !!btn, 'force:', !!forceLoad);
+
+    // Check if memory marker exists in this conversation already
     if (conversationHasMemoryMarker()) {
-      console.log('[AI Memory] Memory already present in conversation, skipping');
+      console.log('[AI Memory] Memory already present in this conversation, skipping');
       memoryAlreadyLoaded = true;
       return;
     }
@@ -245,6 +271,18 @@
         return;
       }
 
+      // Check if this exact memory version was already injected (globally on this platform)
+      const fingerprint = extractFingerprint(markdown);
+      if (fingerprint && !forceLoad) {
+        const alreadyDone = await wasAlreadyInjected(fingerprint);
+        if (alreadyDone) {
+          console.log('[AI Memory] Fingerprint', fingerprint, 'already injected on', extractor.platform, '— skipping');
+          memoryAlreadyLoaded = true;
+          if (btn) btn.classList.remove('loading');
+          return;
+        }
+      }
+
       const input = extractor.getInputElement();
       if (!input) {
         console.warn('[AI Memory] Could not find chat input element');
@@ -254,6 +292,12 @@
 
       insertTextIntoInput(input, markdown);
       memoryAlreadyLoaded = true;
+
+      // Store the fingerprint so we don't inject this version again
+      if (fingerprint) {
+        markAsInjected(fingerprint);
+        console.log('[AI Memory] Marked fingerprint', fingerprint, 'as injected');
+      }
 
       if (btn) {
         btn.classList.remove('loading');
