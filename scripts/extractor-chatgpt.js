@@ -79,8 +79,7 @@ const ChatGPTExtractor = {
       .forEach(el => el.remove());
 
     return clone.textContent.trim();
-  }
-};
+  },
 
   getInputElement() {
     return document.querySelector('#prompt-textarea') ||

@@ -84,8 +84,7 @@ const GeminiExtractor = {
       .forEach(el => el.remove());
 
     return clone.textContent.trim();
-  }
-};
+  },
 
   getInputElement() {
     return document.querySelector('.ql-editor[contenteditable="true"]') ||
