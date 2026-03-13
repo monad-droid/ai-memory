@@ -215,7 +215,7 @@
 
     try {
       const markdown = await new Promise((resolve) => {
-        chrome.runtime.sendMessage({ type: 'GET_MEMORY_MARKDOWN' }, resolve);
+        chrome.runtime.sendMessage({ type: 'GET_MEMORY_MARKDOWN', excludePlatform: extractor.platform }, resolve);
       });
 
       if (!markdown) {

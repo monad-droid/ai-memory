@@ -169,15 +169,20 @@ function formatBytes(bytes) {
 }
 
 // Build memory markdown for injection into AI chats
-async function buildMemoryMarkdown() {
+// excludePlatform: skip conversations from this platform (e.g. don't load Claude convos into Claude)
+async function buildMemoryMarkdown(excludePlatform) {
   const index = await getConversationIndex();
   if (index.length === 0) return null;
 
   const conversations = [];
   for (const entry of index) {
     const conv = await getConversation(entry.id);
-    if (conv) conversations.push(conv);
+    if (conv && (!excludePlatform || conv.platform !== excludePlatform)) {
+      conversations.push(conv);
+    }
   }
+
+  if (conversations.length === 0) return null;
 
   const platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini' };
   const platformCounts = {};
@@ -269,7 +274,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
 
       case 'GET_MEMORY_MARKDOWN':
-        return await buildMemoryMarkdown();
+        return await buildMemoryMarkdown(message.excludePlatform);
 
       default:
         return { error: 'Unknown message type' };
