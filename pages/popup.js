@@ -13,12 +13,23 @@ const exportClearBtn = document.getElementById('exportClearBtn');
 const memoryFileBtn = document.getElementById('memoryFileBtn');
 const uploadAllBtn = document.getElementById('uploadAllBtn');
 const autoInjectToggle = document.getElementById('autoInjectToggle');
+const showSyncedToggle = document.getElementById('showSyncedToggle');
 
 let currentFilter = 'all';
 let allConversations = [];
+let showSynced = false;
 
 const STORAGE_WARN_PERCENT = 70;
 const STORAGE_CRITICAL_PERCENT = 90;
+
+const PLATFORM_COLORS = {
+  claude: '#d97706',
+  chatgpt: '#059669',
+  gemini: '#2563eb',
+  grok: '#525252'
+};
+
+const ALL_PLATFORMS = ['claude', 'chatgpt', 'gemini', 'grok'];
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
@@ -40,31 +51,54 @@ autoInjectToggle.addEventListener('change', async () => {
   showToast(autoInjectToggle.checked ? 'Auto-load enabled' : 'Auto-load disabled', 'success');
 });
 
+// Show synced toggle
+if (showSyncedToggle) {
+  showSyncedToggle.addEventListener('change', () => {
+    showSynced = showSyncedToggle.checked;
+    renderConversations();
+  });
+}
+
 async function loadConversations() {
-  allConversations = await sendMessage({ type: 'GET_INDEX' });
+  allConversations = await sendMessage({ type: 'GET_INDEX_WITH_SYNC' }) || [];
   renderConversations();
 }
 
 async function loadStats() {
-  const stats = await sendMessage({ type: 'GET_STATS' });
-  if (stats && stats.totalConversations > 0) {
-    const parts = [`${stats.totalConversations} conversations`];
-    if (stats.byPlatform) {
-      for (const [platform, count] of Object.entries(stats.byPlatform)) {
-        if (count > 0) {
-          const name = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok' }[platform] || platform;
-          parts.push(`<span class="platform-count">${name}: ${count}</span>`);
-        }
-      }
-    }
-    statsEl.innerHTML = parts.join(' &middot; ');
+  const unsent = await sendMessage({ type: 'GET_UNSENT_COUNT' });
+  const total = allConversations.length;
+  const synced = total - (typeof unsent === 'number' ? unsent : 0);
+  if (total > 0) {
+    statsEl.innerHTML = `${total} conversations &middot; <span class="synced-count">${synced} synced</span> &middot; <span class="unsent-count">${unsent || 0} pending</span>`;
+  } else {
+    statsEl.innerHTML = '';
   }
+}
+
+function buildSyncDots(conv) {
+  const targets = ALL_PLATFORMS.filter(p => p !== conv.platform);
+  return targets.map(p => {
+    const synced = conv.syncStatus && conv.syncStatus[p];
+    const color = PLATFORM_COLORS[p];
+    const label = { claude: 'C', chatgpt: 'G', gemini: 'Ge', grok: 'Gk' }[p];
+    const title = `${({ claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok' })[p]}: ${synced ? 'Synced' : 'Pending'}`;
+    if (synced) {
+      return `<span class="sync-dot synced" style="background:${color}" title="${title}">${label}</span>`;
+    } else {
+      return `<span class="sync-dot pending" style="border-color:${color};color:${color}" title="${title}">${label}</span>`;
+    }
+  }).join('');
 }
 
 function renderConversations() {
   const query = searchInput.value.toLowerCase().trim();
 
   let filtered = allConversations;
+
+  // By default, hide fully-synced conversations
+  if (!showSynced) {
+    filtered = filtered.filter(c => !c.allSynced);
+  }
 
   if (currentFilter !== 'all') {
     filtered = filtered.filter(c => c.platform === currentFilter);
@@ -83,9 +117,12 @@ function renderConversations() {
     if (query) {
       emptyState.querySelector('p').textContent = 'No matching conversations.';
       emptyState.querySelector('.hint').textContent = 'Try a different search term.';
+    } else if (!showSynced && allConversations.length > 0) {
+      emptyState.querySelector('p').textContent = 'All conversations synced!';
+      emptyState.querySelector('.hint').textContent = 'Toggle "Show synced" to see all conversations.';
     } else {
       emptyState.querySelector('p').textContent = 'No saved conversations yet.';
-      emptyState.querySelector('.hint').textContent = 'Visit Claude, ChatGPT, or Gemini to start saving!';
+      emptyState.querySelector('.hint').textContent = 'Visit Claude, ChatGPT, Gemini, or Grok to start saving!';
     }
     return;
   }
@@ -93,13 +130,16 @@ function renderConversations() {
   emptyState.style.display = 'none';
 
   conversationList.innerHTML = filtered.map(conv => `
-    <div class="conversation-item" data-id="${conv.id}" data-url="${conv.url}">
+    <div class="conversation-item ${conv.allSynced ? 'fully-synced' : ''}" data-id="${conv.id}" data-url="${conv.url}">
       <div class="platform-badge ${conv.platform}">${getPlatformLabel(conv.platform)}</div>
       <div class="conversation-info">
         <div class="conversation-title" title="${escapeHtml(conv.title)}">${escapeHtml(conv.title)}</div>
         <div class="conversation-meta">
           <span class="msg-count">${conv.messageCount} messages</span>
           <span>${timeAgo(conv.lastUpdated)}</span>
+        </div>
+        <div class="sync-status">
+          ${buildSyncDots(conv)}
         </div>
       </div>
       <button class="delete-btn" data-id="${conv.id}" title="Delete">
@@ -128,6 +168,7 @@ function renderConversations() {
       await sendMessage({ type: 'DELETE_CONVERSATION', id });
       await loadConversations();
       await loadStats();
+      await updateUploadAllButton();
       showToast('Conversation deleted', 'success');
     });
   });
@@ -160,6 +201,7 @@ saveNowBtn.addEventListener('click', async () => {
       await sendMessage({ type: 'SAVE_CONVERSATION', conversation: response.conversation });
       await loadConversations();
       await loadStats();
+      await updateUploadAllButton();
       showToast('Conversation saved!', 'success');
     } else {
       showToast(response?.error || 'No AI conversation found on this page', 'error');
@@ -209,7 +251,6 @@ memoryFileBtn.addEventListener('click', async () => {
 function buildMemoryFileMarkdown(conversations) {
   const platformNames = { claude: 'Claude', chatgpt: 'ChatGPT', gemini: 'Gemini', grok: 'Grok' };
 
-  // Count by platform
   const platformCounts = {};
   for (const conv of conversations) {
     const name = platformNames[conv.platform] || conv.platform;
@@ -225,7 +266,6 @@ function buildMemoryFileMarkdown(conversations) {
   md += `> Generated on ${date} | ${conversations.length} conversations (${platformSummary})\n\n`;
   md += `Use this file to understand my background, interests, communication style, and what I've been working on. Each conversation is separated by a horizontal rule.\n`;
 
-  // Sort by date, newest first
   const sorted = [...conversations].sort((a, b) =>
     new Date(b.lastUpdated) - new Date(a.lastUpdated)
   );
@@ -272,12 +312,11 @@ uploadAllBtn.addEventListener('click', async () => {
 
   uploadAllBtn.classList.add('loading');
 
-  // Open a new tab for each platform that has unsent conversations
   for (const p of status.platforms) {
     chrome.tabs.create({ url: p.url, active: false });
   }
 
-  showToast(`Opening ${status.platforms.length} AI platforms to sync ${status.totalUnsent} conversations`, 'success');
+  showToast(`Opening ${status.platforms.length} platforms to sync`, 'success');
 
   setTimeout(() => {
     uploadAllBtn.classList.remove('loading');
@@ -307,7 +346,6 @@ async function checkStorageUsage() {
 
 // Export & Clear handler
 exportClearBtn.addEventListener('click', async () => {
-  // First export
   const data = await sendMessage({ type: 'EXPORT_ALL' });
   if (!data || !data.conversations || data.conversations.length === 0) {
     showToast('No conversations to export', 'error');
@@ -322,13 +360,13 @@ exportClearBtn.addEventListener('click', async () => {
   a.click();
   URL.revokeObjectURL(url);
 
-  // Then clear after a brief pause to ensure download started
   setTimeout(async () => {
     await sendMessage({ type: 'CLEAR_ALL' });
     allConversations = [];
     renderConversations();
     await loadStats();
     await checkStorageUsage();
+    await updateUploadAllButton();
     showToast(`Exported ${data.conversations.length} conversations and cleared storage`, 'success');
   }, 500);
 });

@@ -367,6 +367,34 @@ async function getUploadAllStatus() {
   return { platforms, totalUnsent };
 }
 
+// Get conversation index enriched with per-platform sync status
+async function getIndexWithSync() {
+  const index = await getConversationIndex();
+  if (index.length === 0) return [];
+
+  const data = await chrome.storage.local.get('ai_memory_settings');
+  const settings = data['ai_memory_settings'] || {};
+  const trackers = {};
+  for (const p of ALL_PLATFORMS) {
+    trackers[p] = settings[`sentTo_${p}`] || {};
+  }
+
+  return index.map(entry => {
+    const targets = ALL_PLATFORMS.filter(p => p !== entry.platform);
+    const syncStatus = {};
+    let allSynced = true;
+    for (const target of targets) {
+      const sentCount = trackers[target][entry.id] || 0;
+      const synced = sentCount >= entry.messageCount;
+      syncStatus[target] = synced;
+      if (!synced) allSynced = false;
+    }
+    // The origin platform is always "synced" (it lives there)
+    syncStatus[entry.platform] = true;
+    return { ...entry, syncStatus, allSynced };
+  });
+}
+
 // Message handler
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const handler = async () => {
@@ -376,6 +404,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       case 'GET_INDEX':
         return await getConversationIndex();
+
+      case 'GET_INDEX_WITH_SYNC':
+        return await getIndexWithSync();
 
       case 'GET_CONVERSATION':
         return await getConversation(message.id);

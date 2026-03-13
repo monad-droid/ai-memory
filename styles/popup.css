@@ -439,6 +439,51 @@ body {
   color: white;
 }
 
+/* Sync Status Dots */
+.sync-status {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.sync-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.sync-dot.synced {
+  color: white;
+  opacity: 0.9;
+}
+
+.sync-dot.pending {
+  background: transparent;
+  border: 1.5px solid;
+  opacity: 0.7;
+}
+
+/* Fully synced conversation row */
+.conversation-item.fully-synced {
+  opacity: 0.5;
+}
+
+/* Stats styling */
+.synced-count {
+  color: #10b981;
+}
+
+.unsent-count {
+  color: #f59e0b;
+}
+
 /* Empty State */
 .empty-state {
   display: flex;
