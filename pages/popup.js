@@ -33,6 +33,8 @@ const ALL_PLATFORMS = ['claude', 'chatgpt', 'gemini', 'grok'];
 
 // Initialize
 document.addEventListener('DOMContentLoaded', async () => {
+  // Purge any memory dump conversations before loading (breaks circular sync loops)
+  await sendMessage({ type: 'PURGE_MEMORY_DUMPS' });
   await loadConversations();
   await loadStats();
   await checkStorageUsage();

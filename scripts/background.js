@@ -474,6 +474,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'GET_UPLOAD_ALL_STATUS':
         return await getUploadAllStatus();
 
+      case 'PURGE_MEMORY_DUMPS':
+        await purgeMemoryDumps();
+        return { purged: true };
+
       case 'REFRESH_BADGE':
         await refreshBadge();
         return { refreshed: true };
@@ -489,6 +493,48 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return true; // Keep message channel open for async response
 });
+
+// Purge memory dump conversations from storage
+// These are conversations created when memory was injected into an AI chat.
+// They should never have been saved and they pollute the pending count forever.
+async function purgeMemoryDumps() {
+  const index = await getConversationIndex();
+  let purged = 0;
+
+  for (const entry of index) {
+    const conv = await getConversation(entry.id);
+    if (!conv) continue;
+    if (isMemoryDumpConversation(conv)) {
+      // Check if there's real conversation after stripping the dump prefix
+      const stripped = stripMemoryDumpPrefix({ ...conv, messages: [...conv.messages] });
+      if (stripped.messages.length === 0) {
+        // Pure memory dump with no follow-up — delete entirely
+        await deleteConversation(entry.id);
+        purged++;
+      } else {
+        // Has real follow-up messages after the dump — mark it in the index
+        // so count functions can handle the adjusted message count
+        const convKey = `conv_${entry.id}`;
+        const cleanConv = { ...conv, messages: stripped.messages, messageCount: stripped.messages.length };
+        await chrome.storage.local.set({ [convKey]: cleanConv });
+
+        // Update index with corrected message count
+        const indexData = await chrome.storage.local.get(STORAGE_KEY_INDEX);
+        const idx = indexData[STORAGE_KEY_INDEX] || {};
+        if (idx[entry.id]) {
+          idx[entry.id].messageCount = stripped.messages.length;
+          await chrome.storage.local.set({ [STORAGE_KEY_INDEX]: idx });
+        }
+        purged++;
+      }
+    }
+  }
+
+  if (purged > 0) {
+    console.log(`[AI Memory] Purged ${purged} memory dump conversations`);
+    await refreshBadge();
+  }
+}
 
 // Migrate sentTo trackers from nested ai_memory_settings to per-platform keys
 async function migrateSentTrackers() {
@@ -517,6 +563,7 @@ async function migrateSentTrackers() {
 // Initialize badge on install and re-inject content scripts into open tabs
 chrome.runtime.onInstalled.addListener(async () => {
   await migrateSentTrackers();
+  await purgeMemoryDumps();
   await refreshBadge();
 
   // Re-inject content scripts into already-open matching tabs
@@ -545,5 +592,6 @@ chrome.runtime.onInstalled.addListener(async () => {
 // Refresh badge on startup (not just install)
 chrome.runtime.onStartup.addListener(async () => {
   await migrateSentTrackers();
+  await purgeMemoryDumps();
   await refreshBadge();
 });
