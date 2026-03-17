@@ -28,14 +28,25 @@ const GeminiExtractor = {
     const messages = [];
 
     // Gemini uses specific turn containers
-    const turns = document.querySelectorAll(
+    let turns = document.querySelectorAll(
       'message-content, [class*="query-content"], [class*="response-content"], [class*="model-response"], [class*="user-query"]'
     );
 
     if (turns.length > 0) {
-      turns.forEach((turn, index) => {
+      // Deduplicate: remove elements that are descendants of other matched elements
+      // (e.g. message-content inside [class*="model-response"] would double-count)
+      const turnArr = Array.from(turns);
+      const filtered = turnArr.filter(el =>
+        !turnArr.some(other => other !== el && other.contains(el))
+      );
+
+      const seen = new Set();
+      filtered.forEach((turn, index) => {
         const content = this.extractContent(turn);
         if (content && content.length > 1) {
+          // Skip duplicate content from overlapping selectors
+          if (seen.has(content)) return;
+          seen.add(content);
           const role = this.detectRole(turn, index);
           messages.push({ role, content, timestamp: new Date().toISOString() });
         }
@@ -45,9 +56,12 @@ const GeminiExtractor = {
 
     // Fallback: generic conversation containers
     const containers = document.querySelectorAll('[class*="turn"], [class*="conversation-turn"], [class*="chat-turn"]');
+    const seen = new Set();
     containers.forEach((container, index) => {
       const content = this.extractContent(container);
       if (content && content.length > 1) {
+        if (seen.has(content)) return;
+        seen.add(content);
         const role = this.detectRole(container, index);
         messages.push({ role, content, timestamp: new Date().toISOString() });
       }

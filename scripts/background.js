@@ -21,8 +21,14 @@ function isMemoryDumpConversation(conversation) {
   if (!conversation.messages || conversation.messages.length === 0) return false;
   const firstMsg = conversation.messages[0].content || '';
   return /\[AIM:[a-z0-9]+\]/i.test(firstMsg)
+    || firstMsg.includes('[AIM_MEMORY_START]')
     || firstMsg.includes('# My AI Conversation History')
     || firstMsg.includes('# New AI Conversation History');
+}
+
+// Strip [AIM_MEMORY_START]...[AIM_MEMORY_END] blocks from message content
+function stripMemoryBlocks(content) {
+  return content.replace(/\[AIM_MEMORY_START\][\s\S]*?\[AIM_MEMORY_END\]/g, '').trim();
 }
 
 // Save a conversation to local storage
@@ -130,7 +136,18 @@ async function exportAll() {
 
   for (const entry of index) {
     const conv = await getConversation(entry.id);
-    if (conv) conversations.push(conv);
+    if (!conv) continue;
+
+    // Strip memory dump prefixes so exports don't contain injected history blocks
+    const cleaned = stripMemoryDumpPrefix({ ...conv, messages: [...conv.messages.map(m => ({ ...m }))] });
+    if (cleaned.messages.length === 0) continue; // Pure memory dump — skip entirely
+
+    // Also strip any embedded memory blocks from all messages
+    for (const msg of cleaned.messages) {
+      msg.content = stripMemoryBlocks(msg.content);
+    }
+    cleaned.messageCount = cleaned.messages.length;
+    conversations.push(cleaned);
   }
 
   return {
@@ -213,6 +230,7 @@ function stripMemoryDumpPrefix(conv) {
   if (!conv.messages || conv.messages.length === 0) return conv;
   const firstMsg = conv.messages[0].content || '';
   const isMemoryDump = /\[AIM:[a-z0-9]+\]/i.test(firstMsg)
+    || firstMsg.includes('[AIM_MEMORY_START]')
     || firstMsg.includes('# My AI Conversation History')
     || firstMsg.includes('# New AI Conversation History');
   if (!isMemoryDump) return conv;
@@ -222,6 +240,10 @@ function stripMemoryDumpPrefix(conv) {
     skipUntil = 2;
   }
   conv.messages = conv.messages.slice(skipUntil);
+  // Also strip any embedded memory blocks from remaining messages
+  for (const msg of conv.messages) {
+    msg.content = stripMemoryBlocks(msg.content);
+  }
   return conv;
 }
 
@@ -274,7 +296,8 @@ async function buildMemoryMarkdown(excludePlatform) {
 
   const date = new Date().toISOString().slice(0, 10);
 
-  let md = `# New AI Conversation History\n`;
+  let md = `[AIM_MEMORY_START]\n`;
+  md += `# New AI Conversation History\n`;
   md += `> Generated on ${date} | ${conversations.length} new/updated conversations (${platformSummary})\n\n`;
   md += `This is my latest conversation history across AI platforms. Use it to understand my background, interests, communication style, and what I've been working on.\n`;
 
@@ -297,6 +320,8 @@ async function buildMemoryMarkdown(excludePlatform) {
       md += `**${role}:** ${msg.content}\n\n`;
     }
   }
+
+  md += `\n[AIM_MEMORY_END]\n`;
 
   return { markdown: md, sentMap: newSentMap, targetPlatform: excludePlatform };
 }
